@@ -1,142 +1,68 @@
-import React, { useState, useEffect } from 'react';
-import { ArrowRight, ArrowLeft, ScanLine } from 'lucide-react';
+import { useState } from 'react';
+import { ArrowLeft, ArrowRight, ClipboardPaste, ScanLine } from 'lucide-react';
 import { ImageImporter } from './ImageImporter';
+import { cleanLetters } from '../lib/puzzle';
+import type { Puzzle } from '../lib/puzzle';
 
 interface InputLettersProps {
-  cols: number;
-  onNext: (columnLetters: string[][]) => { isValid: boolean, message?: string }; // Updated signature to allow validation feedback
+  puzzle: Puzzle;
+  onChange: (puzzle: Puzzle) => void;
+  onNext: () => void;
   onBack: () => void;
-  initialLetters: string[][];
 }
 
-export const InputLetters: React.FC<InputLettersProps> = ({ cols, onNext, onBack, initialLetters }) => {
-  const [letters, setLetters] = useState<string[][]>(() => {
-    // Ensure we have an array of arrays of the correct length
-    if (initialLetters && initialLetters.length === cols) {
-      return initialLetters;
-    }
-    return Array.from({ length: cols }, () => []);
-  });
-
+export function InputLetters({ puzzle, onChange, onNext, onBack }: InputLettersProps) {
   const [showImporter, setShowImporter] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  // Sync state if cols changes (though typically this component unmounts on back)
-  useEffect(() => {
-    setLetters(prev => {
-        if (prev.length === cols) return prev;
-        return Array.from({ length: cols }, () => []);
-    });
-  }, [cols]);
-
-  const handleInputChange = (index: number, value: string) => {
-    // Only allow letters
-    const cleanValue = value.toUpperCase().replace(/[^A-Z]/g, '');
-    setLetters(prev => {
-        const newLetters = [...prev];
-        newLetters[index] = cleanValue.split('');
-        return newLetters;
-    });
+  const [bulk, setBulk] = useState('');
+  const [showBulk, setShowBulk] = useState(false);
+  const [error, setError] = useState('');
+  const total = puzzle.columnLetters.reduce((n, col) => n + col.length, 0);
+  const unknown = puzzle.columnLetters.reduce((n, col) => n + col.filter(c => c === '?').length, 0);
+  const updateColumn = (col: number, value: string) => {
+    const letters = cleanLetters(value);
+    if (letters.length > puzzle.rows) { setError(`Column ${col + 1} cannot contain more than ${puzzle.rows} letters.`); return; }
+    onChange({ ...puzzle, columnLetters: puzzle.columnLetters.map((old, c) => c === col ? letters : old) });
+    setError('');
   };
-
-  const handleImport = (importedCols: string[][]) => {
-      // importedCols might be shorter or longer than expected cols
-      // We map them to our current state
-      setLetters(prev => {
-          const newLetters = [...prev];
-          importedCols.forEach((colData, index) => {
-              if (index < newLetters.length) {
-                  newLetters[index] = colData;
-              }
-          });
-          return newLetters;
-      });
-      setShowImporter(false);
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const result = onNext(letters);
-    if (result && !result.isValid) {
-        setError(result.message || "Please check your inputs.");
-    }
-  };
-
-  return (
-    <div className="flex flex-col items-center justify-center p-6 bg-white rounded-lg shadow-md max-w-6xl mx-auto mt-10">
-      <div className="flex justify-between items-center w-full mb-6">
-        <h2 className="text-2xl font-bold text-gray-800">Enter Letters</h2>
-        
-        <button 
-            onClick={() => setShowImporter(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-700 rounded-md hover:bg-indigo-100 transition-colors border border-indigo-200"
-        >
-            <ScanLine size={18} />
-            <span className="hidden sm:inline">Fill from Image</span>
-        </button>
+  return <section className="panel mx-auto mt-6 max-w-6xl p-5 sm:p-7">
+    <div className="flex flex-wrap items-start justify-between gap-4">
+      <div><p className="eyebrow">STEP 1 · COLUMN LETTERS</p><h2 className="mt-1 text-2xl font-bold">What letters can drop?</h2></div>
+      <div className="flex flex-wrap gap-2">
+        <button className="btn-secondary" onClick={() => setShowBulk(!showBulk)}><ClipboardPaste size={16} /> Paste columns</button>
+        <button className="btn-secondary" onClick={() => setShowImporter(true)}><ScanLine size={16} /> Read image</button>
       </div>
-
-      <p className="text-gray-600 mb-6 text-center max-w-lg">
-        Type the available letters for each column. Or upload an image of the letter grid to auto-fill.
-      </p>
-      
-      {error && (
-          <div className="w-full bg-red-50 text-red-600 p-3 mb-4 rounded-md text-sm text-center border border-red-200">
-              {error}
-          </div>
-      )}
-
-      <form onSubmit={handleSubmit} className="w-full">
-        <div className="overflow-x-auto pb-4">
-            <div className="flex gap-2 min-w-max justify-center px-4">
-            {Array.from({ length: cols }).map((_, i) => (
-                <div key={i} className="flex flex-col w-12 sm:w-16">
-                <label className="text-xs font-medium text-gray-500 mb-1 text-center">Col {i + 1}</label>
-                <div className="relative">
-                    <input
-                        type="text"
-                        value={letters[i] ? letters[i].join('') : ''}
-                        onChange={(e) => handleInputChange(i, e.target.value)}
-                        className="w-full h-32 sm:h-40 px-2 py-2 border border-gray-300 rounded-md text-center font-mono text-lg uppercase focus:outline-none focus:ring-2 focus:ring-blue-500 writing-vertical-lr"
-                        style={{ writingMode: 'vertical-lr', textOrientation: 'upright', letterSpacing: '0.5em' }}
-                        placeholder="..."
-                    />
-                </div>
-                <div className="text-xs text-gray-400 mt-1 text-center font-mono">
-                    {letters[i]?.length || 0}
-                </div>
-                </div>
-            ))}
-            </div>
-        </div>
-
-        <div className="flex justify-between w-full mt-8 pt-4 border-t border-gray-100">
-          <button
-            type="button"
-            onClick={onBack}
-            className="flex items-center space-x-2 text-gray-600 hover:text-gray-900 px-4 py-2 hover:bg-gray-50 rounded-md"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            <span>Back</span>
-          </button>
-          
-          <button
-            type="submit"
-            className="flex items-center space-x-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-8 rounded-md transition-colors shadow-sm"
-          >
-            <span>Next: Grid Setup</span>
-            <ArrowRight className="w-4 h-4" />
-          </button>
-        </div>
-      </form>
-
-      {showImporter && (
-          <ImageImporter 
-            numColumns={cols}
-            onImport={handleImport}
-            onClose={() => setShowImporter(false)}
-          />
-      )}
     </div>
-  );
-};
+    <p className="mt-3 text-sm text-slate-600">Letters can be in any order within their column. Use <strong>?</strong> for each missing or unreadable letter. An entirely unknown column needs one ? per white square.</p>
+    {showBulk && <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-4">
+      <label className="field-label" htmlFor="bulk-columns">One column per line; write - for an empty column.</label>
+      <textarea id="bulk-columns" className="field mt-2 h-28 font-mono" value={bulk} onChange={e => setBulk(e.target.value)} placeholder={'ADE?\nEHL\n-\nORW'} />
+      <button className="btn-secondary mt-2" onClick={() => {
+        const lines = bulk.replace(/\r/g, '').trim().split('\n');
+        if (lines.length !== puzzle.cols) { setError(`Paste exactly ${puzzle.cols} lines, one per column.`); return; }
+        if (lines.some(line => !/^[A-Za-z?\s-]*$/.test(line))) { setError('Columns may contain only letters, ?, spaces or - for empty.'); return; }
+        const columnLetters = lines.map(cleanLetters);
+        if (columnLetters.some(col => col.length > puzzle.rows)) { setError('One or more columns contain more letters than rows.'); return; }
+        onChange({ ...puzzle, columnLetters }); setError(''); setShowBulk(false);
+      }}>Apply pasted columns</button>
+    </div>}
+    {error && <p role="alert" className="error-box mt-4">{error}</p>}
+    <div className="mt-6 overflow-x-auto pb-4">
+      <div className="flex w-max min-w-full justify-center gap-2">
+        {puzzle.columnLetters.map((letters, col) => <label key={col} className="flex w-16 shrink-0 flex-col items-center gap-2">
+          <span className="text-xs font-semibold text-slate-600">Col {col + 1}</span>
+          <textarea aria-label={`Column ${col + 1} letters`} spellCheck={false} autoCapitalize="characters" className="field h-40 resize-y px-2 text-center font-mono text-lg uppercase leading-7" value={letters.join('')} onChange={e => updateColumn(col, e.target.value)} placeholder="A?" />
+          <span className="text-xs text-slate-500">{letters.length}{letters.includes('?') ? ` (${letters.filter(c => c === '?').length} ?)` : ''}</span>
+        </label>)}
+      </div>
+    </div>
+    <div className="mt-3 flex flex-wrap items-center justify-between gap-4 border-t border-slate-100 pt-5">
+      <button className="btn-secondary" onClick={onBack}><ArrowLeft size={16} /> Back</button>
+      <p className="text-xs text-slate-500">{total} letters · {unknown} unknown · draft saved locally</p>
+      <button className="btn-primary" onClick={onNext}>Set black squares <ArrowRight size={16} /></button>
+    </div>
+    {showImporter && <ImageImporter numColumns={puzzle.cols} maxLettersPerColumn={puzzle.rows} onClose={() => setShowImporter(false)} onImport={columnLetters => {
+      if (columnLetters.some(col => col.length > puzzle.rows)) { setError('OCR found more letters than answer rows in a column. Check the crop and recognition.'); return; }
+      onChange({ ...puzzle, columnLetters }); setShowImporter(false); setError('');
+    }} />}
+  </section>;
+}

@@ -1,0 +1,28 @@
+{
+  "source": "wordfreq v3.2, large English frequency list",
+  "author": "Robyn Speer",
+  "license": "CC-BY-SA-4.0 (derived data); see README.md and wordfreq-NOTICE.md",
+  "sourceUrl": "https://github.com/rspeer/wordfreq/tree/42233e6c36ce792031bcccfa17cdd0cec9af5fa7",
+  "sourceRevision": "42233e6c36ce792031bcccfa17cdd0cec9af5fa7",
+  "sourceFiles": {
+    "large_en.msgpack.gz": {
+      "path": "wordfreq/data/large_en.msgpack.gz",
+      "sha256": "dffae8066b78dce0a6667cf5f58e567054f902674667090a7ac8a8a44628b05c"
+    },
+    "NOTICE.md": {
+      "path": "NOTICE.md",
+      "sha256": "d9b104dafe63886af55e7cea7484824e32e12d4e1f57f319923dd643b36d6b15"
+    },
+    "LICENSE.txt": {
+      "path": "LICENSE.txt",
+      "sha256": "8990c551671a51765c4dfe9428f3e1d58dc327f49aca346a32d28cc0fcc7aa88"
+    }
+  },
+  "sourceDataSha256": "dffae8066b78dce0a6667cf5f58e567054f902674667090a7ac8a8a44628b05c",
+  "normalization": "Uppercase ASCII words; remove apostrophes; single letters A/I/O only; deduplicate at highest frequency; preserve frequency order",
+  "wordCount": 297822,
+  "uncompressedBytes": 2466090,
+  "compressedBytes": 1215048,
+  "textSha256": "5d03fe527f3bb6094d8e1eab24827a2bb84331f0920faadc7d0513d144164fad",
+  "gzipSha256": "9529acfb719b359fc7068db88d4586be8a805814837fcd655cb908c70b984553"
+}
