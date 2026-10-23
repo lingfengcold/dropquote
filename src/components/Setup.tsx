@@ -20,7 +20,7 @@ export function Setup({ onNext, onExample, onImport, initialRows, initialCols, h
   return <section className="panel mx-auto mt-8 max-w-xl p-6 sm:p-8">
     <p className="eyebrow">START A PUZZLE</p>
     <h2 className="mt-2 text-2xl font-bold">Drop the letters. Find the quote.</h2>
-    <p className="mt-3 text-sm leading-relaxed text-slate-600">Set the answer grid size, enter the letters above each column, then mark the black squares. Missing letters can be entered as <code>?</code>.</p>
+    <p className="mt-3 text-sm leading-relaxed text-slate-600">Set the answer grid size, enter each column's available letters, then mark the black squares. Missing letters can be entered as <code>?</code>.</p>
     {hasDraft && <button className="mt-5 w-full rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-left font-semibold text-blue-800" onClick={onResume}>Continue saved puzzle ({initialRows} × {initialCols}) →</button>}
     <form className="mt-6 space-y-5" onSubmit={e => {
       e.preventDefault();

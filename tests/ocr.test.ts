@@ -121,3 +121,36 @@ test('transparent background composites to white and light text on dark backgrou
 test('malformed pixel buffers are rejected', () => {
   assert.throws(() => preprocessOcrPixels(new Uint8ClampedArray(4), 2, 2));
 });
+
+test('white grid borders do not prevent inversion of a dark letter bank', () => {
+  const width = 20; const height = 20; const pixels = whitePixels(width, height);
+  for (let y = 1; y < height - 1; y++) for (let x = 1; x < width - 1; x++) ink(pixels, width, x, y);
+  ink(pixels, width, 10, 10, 255);
+  const result = preprocessOcrPixels(pixels, width, height);
+  assert.equal(grayAt(result, width, 5, 5), 255, 'dominant black background becomes white');
+  assert.equal(grayAt(result, width, 10, 10), 0, 'white glyph becomes dark');
+});
+
+test('upscaled thick frames are removed around guides without erasing interior I strokes', () => {
+  const width = 200; const height = 120; const pixels = whitePixels(width, height);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x <= 4; x++) ink(pixels, width, x, y);
+    for (let x = width - 5; x < width; x++) ink(pixels, width, x, y);
+    ink(pixels, width, 50, y);
+  }
+  const result = preprocessOcrPixels(pixels, width, height, { removeGridLines: true, boundaries: [0, 100, 200] });
+  assert.equal(grayAt(result, width, 3, 20), 255);
+  assert.equal(grayAt(result, width, width - 3, 20), 255);
+  assert.equal(grayAt(result, width, 50, 20), 0);
+});
+
+test('overlapping uppercase/lowercase detections of one glyph are merged without losing repeated rows', () => {
+  const result = mapSymbolsToColumns([
+    { text: 'S', confidence: 95, bbox: { x0: 10, x1: 18, y0: 1, y1: 20 } },
+    { text: 's', confidence: 93, bbox: { x0: 10, x1: 26, y0: 1, y1: 20 } },
+    { text: 's', confidence: 98, bbox: { x0: 10, x1: 26, y0: 30, y1: 49 } },
+  ], [0, 40], 60);
+  assert.deepEqual(result.columns, [['S', 'S']]);
+  assert.equal(result.symbols[0].bbox.x1, 26, 'full glyph box retained');
+  assert.ok(result.issues.some(issue => issue.message.includes('duplicate OCR detections')));
+});

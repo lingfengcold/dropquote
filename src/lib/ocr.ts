@@ -112,11 +112,31 @@ export function mapSymbolsToColumns(
     });
   }
   symbols.sort((a, b) => a.column - b.column || a.bbox.y0 - b.bbox.y0 || a.bbox.x0 - b.bbox.x0);
-  symbols.forEach(symbol => columns[symbol.column].push(symbol.text));
+  const uniqueSymbols: OcrColumnResult['symbols'] = [];
+  const area = (box: OcrBox) => (box.x1 - box.x0) * (box.y1 - box.y0);
+  for (const symbol of symbols) {
+    const duplicate = uniqueSymbols.findIndex(previous => {
+      if (previous.column !== symbol.column || previous.text !== symbol.text) return false;
+      const overlapWidth = Math.max(0, Math.min(previous.bbox.x1, symbol.bbox.x1) - Math.max(previous.bbox.x0, symbol.bbox.x0));
+      const overlapHeight = Math.max(0, Math.min(previous.bbox.y1, symbol.bbox.y1) - Math.max(previous.bbox.y0, symbol.bbox.y0));
+      return overlapWidth * overlapHeight >= 0.85 * Math.min(area(previous.bbox), area(symbol.bbox));
+    });
+    if (duplicate < 0) {
+      uniqueSymbols.push(symbol);
+    } else {
+      // Tesseract sometimes emits both a partial uppercase S and a lowercase s for
+      // the very same glyph. Merge only same-letter boxes with substantial containment.
+      const previous = uniqueSymbols[duplicate];
+      const preferred = area(symbol.bbox) > area(previous.bbox) ? symbol : previous;
+      uniqueSymbols[duplicate] = { ...preferred, confidence: Math.max(previous.confidence, symbol.confidence), uncertain: true };
+      addIssue(symbol.column, 'Overlapping duplicate OCR detections were merged; verify this letter.');
+    }
+  }
+  uniqueSymbols.forEach(symbol => columns[symbol.column].push(symbol.text));
   columns.forEach((column, index) => {
     if (!column.length) addIssue(index, 'No letters found. Verify whether this column is empty.');
   });
-  return { columns, issues, symbols };
+  return { columns, issues, symbols: uniqueSymbols };
 }
 
 /** Grayscale/contrast conversion with optional conservative, guide-aware grid removal. */
@@ -131,19 +151,17 @@ export function preprocessOcrPixels(
   const count = width * height;
   const grayscale = new Uint8Array(count);
   const histogram = new Uint32Array(256);
-  let edgeSum = 0;
-  let edgeCount = 0;
+  let darkBackgroundPixels = 0;
   for (let index = 0; index < count; index++) {
     const offset = index * 4;
     const alpha = pixels[offset + 3] / 255;
     const value = Math.round((0.299 * pixels[offset] + 0.587 * pixels[offset + 1] + 0.114 * pixels[offset + 2]) * alpha + 255 * (1 - alpha));
     grayscale[index] = value;
-    if (index < width || index >= count - width || index % width === 0 || index % width === width - 1) {
-      edgeSum += value;
-      edgeCount++;
-    }
+    if (value < 128) darkBackgroundPixels++;
   }
-  const invert = edgeSum / edgeCount < 127;
+  // A bright border around a dark letter bank makes the edge average misleading.
+  // Text occupies a minority of a properly cropped bank; use the dominant background.
+  const invert = darkBackgroundPixels > count / 2;
   for (let index = 0; index < count; index++) {
     if (invert) grayscale[index] = 255 - grayscale[index];
     histogram[grayscale[index]]++;
@@ -182,8 +200,16 @@ export function preprocessOcrPixels(
     }
     // Vertical removal is limited to user-visible column boundaries. A tall I inside a column survives.
     if (height >= 100 && options.boundaries) {
-      for (const guide of options.boundaries) {
-        for (let x = Math.max(0, Math.round(guide) - 1); x <= Math.min(width - 1, Math.round(guide) + 1); x++) {
+      for (let guideIndex = 0; guideIndex < options.boundaries.length; guideIndex++) {
+        const guide = options.boundaries[guideIndex];
+        const neighborWidth = Math.min(
+          guideIndex > 0 ? guide - options.boundaries[guideIndex - 1] : Infinity,
+          guideIndex + 1 < options.boundaries.length ? options.boundaries[guideIndex + 1] - guide : Infinity,
+        );
+        // Upscaling a 2px white frame can produce a 4–8px dark stripe. Search the
+        // narrow gutter around the guide, not only the single guide pixel.
+        const tolerance = Math.max(1, Math.min(8, Math.round(neighborWidth * 0.08)));
+        for (let x = Math.max(0, Math.round(guide) - tolerance); x <= Math.min(width - 1, Math.round(guide) + tolerance); x++) {
           let darkCount = 0;
           for (let y = 0; y < height; y++) darkCount += dark[y * width + x];
           if (darkCount >= height * 0.88) {

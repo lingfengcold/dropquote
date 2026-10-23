@@ -1,5 +1,6 @@
 import compressedLexiconUrl from './english-wordfreq.txt.gz?inline';
-import { parseLexiconText } from './lexiconParse';
+import compressedTailUrl from './english-wordnik-tail.txt.gz?inline';
+import { mergeLexiconLayers, parseLexiconText } from './lexiconParse';
 
 export interface LexiconData {
   words: string[];
@@ -20,17 +21,21 @@ export function loadLexicon(): Promise<LexiconData> {
 }
 
 async function decodeBundledLexicon(): Promise<LexiconData> {
+  const [rankedWords, extraWords] = await Promise.all([
+    decodeInlineAsset(compressedLexiconUrl), decodeInlineAsset(compressedTailUrl),
+  ]);
+  return mergeLexiconLayers(rankedWords, extraWords);
+}
+
+async function decodeInlineAsset(url: string): Promise<string[]> {
   // ?inline puts the compressed asset in the worker as a data URI. Decoding it
   // directly keeps dictionary availability independent of GitHub/raw or fetch.
-  const separator = compressedLexiconUrl.indexOf(',');
-  if (separator < 0 || !compressedLexiconUrl.slice(0, separator).endsWith(';base64')) {
+  const separator = url.indexOf(',');
+  if (separator < 0 || !url.slice(0, separator).endsWith(';base64')) {
     throw new Error('内置词库资源格式不正确。');
   }
-  const binary = atob(compressedLexiconUrl.slice(separator + 1));
+  const binary = atob(url.slice(separator + 1));
   const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
   const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
-  const words = parseLexiconText(await new Response(stream).text());
-  // All entries have genuine corpus ranks, including rare vocabulary. Keeping
-  // these aliases avoids duplicating a large array in every solver worker.
-  return { words, rankedWords: words };
+  return parseLexiconText(await new Response(stream).text());
 }

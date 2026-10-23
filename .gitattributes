@@ -1,5 +1,6 @@
-src/data/english-wordfreq.txt.gz binary
+src/data/*.gz binary
 # Preserve upstream notices and license text verbatim, including their whitespace.
 src/data/wordfreq-NOTICE.md text eol=lf -whitespace
 src/data/wordfreq-LICENSE.txt text eol=lf -whitespace
 src/data/CC-BY-SA-4.0.txt text eol=lf -whitespace
+src/data/wordnik-LICENSE.txt text eol=lf -whitespace

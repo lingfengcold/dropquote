@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { createPuzzle, puzzleFromText, EXAMPLE_TEXT, DRAFT_KEY } from '../src/lib/puzzle';
 import type { Puzzle } from '../src/lib/puzzle';
+import { readFileSync } from 'node:fs';
 
 async function ready(page: Page) {
   await page.goto('./');
@@ -40,6 +41,28 @@ test('missing letters are filled only in their own column and reported in result
   await expect(page.getByRole('heading', { name: 'Letters supplied for ?' })).toBeVisible();
   await expect(page.getByText('Column 2:')).toContainText('H');
   await expect(page.getByRole('button', { name: /#1 Score/ })).toContainText('THE');
+});
+
+test('the supplied themed word-list puzzle solves without injecting answer words', async ({ page }) => {
+  await ready(page);
+  const puzzle = JSON.parse(readFileSync(new URL('../tests/fixtures/senses-word-list.json', import.meta.url), 'utf8')) as Puzzle;
+  await importPuzzle(page, puzzle);
+  await page.getByLabel('Search time').selectOption('5');
+  await page.getByLabel('Allow joined words').check();
+  await page.getByRole('button', { name: 'Find quotes' }).click();
+  const reference = page.getByRole('button').filter({ hasText: 'ODORLESS WATCHTOWER EARSHOT HEARSAY FORESIGHT NOSECLIP TASTEABLE TOUCHDOWN EARRING HANDCRAFT NOSEGUARD' });
+  await expect(reference).toBeVisible({ timeout: 20000 });
+  await reference.click();
+  await expect(page.getByText('Joined word candidates to review:')).toContainText('NOSECLIP');
+  await page.screenshot({ path: 'test-results/senses-word-list.png', fullPage: true });
+  // The pool also permits ROSECLIP/EARNING. One genuine known letter can resolve
+  // that ambiguity without altering frequency ranks or injecting whole answers.
+  await page.getByRole('button', { name: 'Adjust puzzle' }).click();
+  await page.getByRole('button', { name: 'Known letters' }).click();
+  await page.getByRole('textbox', { name: 'Known letter row 3 column 15' }).fill('N');
+  await expect(page.getByLabel('Allow joined words')).toBeChecked();
+  await page.getByRole('button', { name: 'Find quotes' }).click();
+  await expect(page.getByRole('button', { name: /#1 Score/ })).toContainText('ODORLESS WATCHTOWER EARSHOT HEARSAY FORESIGHT NOSECLIP TASTEABLE TOUCHDOWN EARRING HANDCRAFT NOSEGUARD', { timeout: 20000 });
 });
 
 test('a large ambiguous search stays responsive and can be immediately cancelled', async ({ page }) => {

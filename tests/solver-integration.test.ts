@@ -3,11 +3,13 @@ import { readFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import test from 'node:test';
 import { DropQuoteSolver } from '../src/lib/solver.ts';
-import { parseLexiconText } from '../src/data/lexiconParse.ts';
+import { mergeLexiconLayers, parseLexiconText } from '../src/data/lexiconParse.ts';
+import { parsePuzzle } from '../src/lib/puzzle.ts';
 
 // Use the actual distributed data, without injecting quote words or special ranks.
-const words = parseLexiconText(gunzipSync(readFileSync(new URL('../src/data/english-wordfreq.txt.gz', import.meta.url))).toString('utf8'));
-const solver = new DropQuoteSolver(words, words);
+const readLayer = (name: string) => parseLexiconText(gunzipSync(readFileSync(new URL(`../src/data/${name}.txt.gz`, import.meta.url))).toString('utf8'));
+const lexicon = mergeLexiconLayers(readLayer('english-wordfreq'), readLayer('english-wordnik-tail'));
+const solver = new DropQuoteSolver(lexicon.words, lexicon.rankedWords);
 
 function makePuzzle(text: string, cols: number, minimumRows = 1) {
   const rows = Math.max(minimumRows, Math.ceil(text.length / cols));
@@ -62,4 +64,16 @@ test('a 30x30 puzzle with the full vocabulary returns a bounded search report', 
   // millisecond scheduling or requiring an underconstrained big quote to solve.
   assert.ok(performance.now() - started < 5_000, 'a 500 ms budget must not turn into an unbounded search');
   assert.ok(report.stats.nodesVisited <= 10_000);
+});
+
+test('the supplied senses word-list puzzle is found using dictionary layers and generic joined words', () => {
+  const puzzle = parsePuzzle(JSON.parse(readFileSync(new URL('./fixtures/senses-word-list.json', import.meta.url), 'utf8')));
+  const answer = 'ODORLESS WATCHTOWER EARSHOT HEARSAY FORESIGHT NOSECLIP TASTEABLE TOUCHDOWN EARRING HANDCRAFT NOSEGUARD';
+  // No customWords or answer-specific priors: TASTEABLE/NOSEGUARD come from the
+  // general dictionary supplement, while NOSECLIP must be inferred as NOSE+CLIP.
+  assert.ok(!lexicon.words.includes('NOSECLIP'));
+  const report = solver.solve(puzzle.rows, puzzle.cols, puzzle.columnLetters, puzzle.blocks, { allowJoinedWords: true, timeLimitMs: 5_000, maxNodes: 1_000_000, maxResults: 30 });
+  const rank = report.results.findIndex(result => result.text === answer);
+  assert.ok(rank >= 0 && rank < 5, `expected senses answer in top 5; status=${report.status}, nodes=${report.stats.nodesVisited}, first=${report.results[0]?.text}`);
+  assert.ok(report.results[rank].joinedWords.some(item => item.word === 'NOSECLIP' && item.parts.join('+') === 'NOSE+CLIP'));
 });

@@ -14,7 +14,7 @@
 1. 设置答案区的行数和列数，或选择 **Try an example**。题目上方的字母库每列可以有不同高度。
 2. 在 **Column letters** 输入各列字母。列内顺序不限，但不能把字母移到其他列。也可以粘贴每列一行的内容，空列写 `-`，或选择 **Read image**。
 3. 在答案区标记黑格；每列字母数量须等于该列白格数量。切到 **Known letters** 可把已经确定的字母填入白格，清空即可解除锁定。
-4. 可补充 **Extra words / names**，用空白、逗号或分号分隔。撇号和连字符会按纯字母单词归一化，例如 `O'NEILL` → `ONEILL`。这会允许相应候选，不代表保证它是答案。
+4. 可补充 **Extra words / names**，用空白、逗号或分号分隔。撇号和连字符会按纯字母单词归一化，例如 `O'NEILL` → `ONEILL`。遇到连写复合词时，可选择 **Allow joined words**，详见下方说明。
 5. 选择搜索时间和搜索力度，点击 **Find quotes**。候选按分数显示，可查看完整网格、复制引文或下载文本。**Adjust puzzle** 返回修改；受预算限制时可提高预算重新搜索。
 
 ### 缺失字母与 `?`
@@ -25,11 +25,17 @@
 
 `?` 越多，可能答案越多；已知字母能明显缩小搜索范围。
 
+### 连写复合词
+
+**Allow joined words** 默认关闭。开启后允许把两个各含至少 3 个字母的常见词或明确补充的额外词拼在同一个词槽，例如 `NOSE` + `CLIP` → `NOSECLIP`；不需要先把整个复合词手工加入词库。组件默认按词频分数筛选，避免罕见名字和缩写任意拼接。此模式适合包含新复合词、主题词表等材料，会扩大候选范围与搜索工作量。
+
+结果会标出这些词及其组成部分，供人工审阅。两个合法单词连在一起不一定是成立的复合词；生成候选也不保证符合题目主题。额外词和复合词功能都会扩充可搜索的候选，不代表保证它们是答案。
+
 ### 图片 OCR
 
-- 上传图片后，裁剪到**上方字母库**，排除题目说明和下方答案区。保留左右完整列宽，裁剪不要只紧贴最边缘字母的笔画。
+- 上传图片后，裁剪到**字母库区域**，排除题目说明和答案区。字母库可能在棋盘上方或下方；保留左右完整列宽，裁剪不要只紧贴最边缘字母的笔画。
 - 列界默认等宽；不等宽图片可以调整内部列界百分比。保持从左到右递增，并使列界与原题各列对齐。
-- **Each column** 为推荐模式；**Whole area** 一次识别整个区域，再按坐标分列，可用于对比结果。必要时尝试去除表格线，并检查处理后的预览，尤其是贴近线条的 `I`、`L`、`T`。
+- **Each column** 为推荐模式；**Whole area** 一次识别整个区域，再按坐标分列，可用于对比结果。默认去除长表格线，可关闭后对比；检查处理后的预览，尤其是容易与线条混淆的 `I` 以及贴线的 `L`、`T`。
 - 识别后逐列审阅、修正漏字和多字，不确定的字母改成 `?`。只有点击 **Apply** 后才会写入题目；识别中可取消，也可关闭导入窗口。
 
 **图片在浏览器本地处理，不会上传给 OCR 服务。** 首次使用需要从 CDN 下载 Tesseract 引擎和英文语言数据；下载不畅时检查网络，或先手动输入列字母。求解词库已经随应用打包，不依赖远程词典服务。
@@ -102,17 +108,25 @@ Remove-Item Env:RUN_OCR_E2E
 
 ## 词库来源与许可
 
-内置 **297,822 个归一化英文词项**，压缩词库约 1.21 MB。来源为 **Robyn Speer** 的 [wordfreq](https://github.com/rspeer/wordfreq) 多语域英文频率数据，包括书籍、字幕、新闻、百科与网络等来源；不是只按单一网站的词频排序。派生词库采用 **[CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/)**，已保留上游归属与许可说明，并向 **Marc Brysbaert 及其他 SUBTLEX 作者**、Google Books Ngram Viewer 和 OpenSubtitles 等数据来源致谢。该数据许可与应用代码分开说明。
+内置 **396,376 个归一化英文词项**，由两层组成，总压缩数据约 1.51 MB：
+
+- **297,822 个有词频排名的词项**：来源为 **Robyn Speer** 的 [wordfreq](https://github.com/rspeer/wordfreq) 多语域英文频率数据，包括书籍、字幕、新闻、百科与网络等来源。派生频率数据采用 **[CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/)**，并向 **Marc Brysbaert 及其他 SUBTLEX 作者**、Google Books Ngram Viewer 和 OpenSubtitles 等来源致谢。
+- **98,554 个普通字典补充词项**：来源为 [Wordnik wordlist](https://github.com/wordnik/wordlist)，**Copyright (c) 2020 Wordnik，MIT License**。它扩大可搜索的低频词范围，不给补充词编造频率或人工提高排名。
+
+两层均保留固定来源版本和归属。词库范围与语料词频分别管理；这些数据许可与应用代码分开说明。
 
 - [词库来源、归属和本项目的处理方式](./src/data/README.md)
 - [上游原始 NOTICE](./src/data/wordfreq-NOTICE.md)
 - [完整 CC BY-SA 4.0 许可](./src/data/CC-BY-SA-4.0.txt)
+- [Wordnik MIT 许可](./src/data/wordnik-LICENSE.txt)
 - [源版本、文件大小及 SHA-256 清单](./src/data/lexicon-manifest.json)
+- [Wordnik 补充词库生成清单](./src/data/wordnik-manifest.json)
 
 词库随 Worker 内嵌，使用时无需从 raw GitHub 下载。开发者可用 Python 3 标准库重新生成固定版本数据：
 
 ```sh
 python scripts/build-lexicon.py
+python scripts/build-wordnik-tail.py
 ```
 
 脚本校验固定源文件的 SHA-256，再生成确定性压缩数据；也支持指定已经下载的源目录进行离线重建，详见词库目录说明。

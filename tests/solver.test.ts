@@ -227,3 +227,83 @@ test('a custom word spanning all 5000 cells does not overflow prefix traversal',
   assert.equal(report.status, 'complete');
   assert.equal(report.results[0].text, word);
 });
+
+test('optional joined-word mode infers two dictionary words without changing the default vocabulary', () => {
+  const input = puzzle('NOSECLIP', 3);
+  const solver = new DropQuoteSolver(['NOSE', 'CLIP'], ['NOSE', 'CLIP']);
+  assert.equal(solver.solve(input.rows, input.cols, input.letters, input.blocks).results.length, 0);
+  const joined = solver.solve(input.rows, input.cols, input.letters, input.blocks, { allowJoinedWords: true });
+  assert.equal(joined.status, 'complete');
+  assert.equal(joined.results[0].text, 'NOSECLIP');
+  assert.deepEqual(joined.results[0].joinedWords, [{ word: 'NOSECLIP', parts: ['NOSE', 'CLIP'] }]);
+  assert.deepEqual(joined.results[0].rareWords, ['NOSECLIP']);
+  assert(joined.results[0].score < 1);
+  assertColumns(joined.results[0], input);
+});
+
+test('joined parts require at least three letters and ordinary dictionary words are not relabeled', () => {
+  const input = puzzle('NOSECLIP', 3);
+  const tooShort = new DropQuoteSolver(['NO', 'SECLIP']).solve(input.rows, input.cols, input.letters, input.blocks, { allowJoinedWords: true });
+  assert.equal(tooShort.results.length, 0);
+  const normal = new DropQuoteSolver(['NOSECLIP', 'NOSE', 'CLIP']).solve(input.rows, input.cols, input.letters, input.blocks, { allowJoinedWords: true });
+  assert.equal(normal.results.length, 1);
+  assert.deepEqual(normal.results[0].joinedWords, []);
+});
+
+test('joined candidates respect local wildcards, repeated-column counts and distinct locks in cached slots', () => {
+  const input = puzzle('NOSECLIP ROSECLIP', 9);
+  input.letters[4][0] = '?';
+  const fixed = Array.from({ length: input.rows }, () => Array<string | null>(input.cols).fill(null));
+  fixed[0][0] = 'N';
+  fixed[1][0] = 'R';
+  const report = new DropQuoteSolver(['NOSE', 'ROSE', 'CLIP'], ['NOSE', 'ROSE', 'CLIP']).solve(input.rows, input.cols, input.letters, input.blocks, { allowJoinedWords: true, fixedLetters: fixed });
+  assert.equal(report.results.length, 1);
+  assert.equal(report.results[0].text, 'NOSECLIP ROSECLIP');
+  assert.deepEqual(report.results[0].resolvedUnknowns, [{ col: 4, letters: ['C'] }]);
+});
+
+test('joined-word candidate generation consumes the node budget, even with entirely unknown columns', () => {
+  const words = ['NOSE', 'ROSE', 'CLIP', 'CAST', 'CASE', 'TEST'];
+  const solver = new DropQuoteSolver(words, words);
+  const report = solver.solve(1, 8, Array.from({ length: 8 }, () => ['?']), [Array<boolean>(8).fill(false)], { allowJoinedWords: true, maxNodes: 3 });
+  assert.equal(report.status, 'node-limit');
+  assert.equal(report.stats.phase, 'indexing');
+  assert.equal(report.stats.nodesVisited, 3);
+  assert.equal(report.results.length, 0);
+});
+
+test('rare dictionary entries are not automatically joined, while explicit custom components remain available', () => {
+  const input = puzzle('NOSECLIP', 3);
+  const solver = new DropQuoteSolver(['NOSE', 'CLIP'], ['CLIP']);
+  const ordinary = solver.solve(input.rows, input.cols, input.letters, input.blocks, { allowJoinedWords: true });
+  assert.equal(ordinary.results.length, 0);
+  const explicit = solver.solve(input.rows, input.cols, input.letters, input.blocks, { allowJoinedWords: true, customWords: ['NOSE'] });
+  assert.equal(explicit.results[0].text, 'NOSECLIP');
+  assert.deepEqual(explicit.results[0].joinedWords[0].parts, ['NOSE', 'CLIP']);
+});
+
+test('joined-word passes count each solution once and can require multiple inferred joins', () => {
+  const input = puzzle('NOSECLIP ROSECLIP', 9);
+  const parts = ['NOSE', 'ROSE', 'CLIP'];
+  const multiple = new DropQuoteSolver(parts, parts).solve(input.rows, input.cols, input.letters, input.blocks, { allowJoinedWords: true });
+  assert.equal(multiple.status, 'complete');
+  assert.equal(multiple.results.length, 2);
+  assert(multiple.results.every(result => result.joinedWords.length === 2));
+  const mixed = new DropQuoteSolver([...parts, 'NOSECLIP'], parts).solve(input.rows, input.cols, input.letters, input.blocks, { allowJoinedWords: true });
+  assert.equal(mixed.status, 'complete');
+  assert.equal(mixed.results.length, 2);
+  assert(mixed.results.every(result => result.joinedWords.length === 1));
+  assert.equal(new Set(mixed.results.map(result => result.text)).size, 2);
+});
+
+test('joined traversal of a 5000-cell custom-component slot stays within the supported grid size', () => {
+  const rows = 50;
+  const cols = 100;
+  const blocks = Array.from({ length: rows }, () => Array<boolean>(cols).fill(false));
+  const letters = Array.from({ length: cols }, () => [...Array<string>(25).fill('A'), ...Array<string>(25).fill('B')]);
+  const parts = ['A'.repeat(2_500), 'B'.repeat(2_500)];
+  const report = new DropQuoteSolver([]).solve(rows, cols, letters, blocks, { allowJoinedWords: true, customWords: parts, timeLimitMs: 1_000 });
+  assert.equal(report.status, 'complete');
+  assert.equal(report.results.length, 2);
+  assert(report.results.some(result => result.text === parts.join('')));
+});

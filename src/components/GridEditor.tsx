@@ -63,6 +63,10 @@ export function GridEditor({ puzzle, onChange, onNext, onBack, ready, options, o
       <label className="field-label">Search time<select className="field mt-1" value={seconds} onChange={e => onOptionsChange({ ...options, timeLimitMs: Number(e.target.value) * 1000 })}>{SEARCH_SECONDS.map(n => <option key={n} value={n}>{n} seconds</option>)}</select></label>
       <label className="field-label">Search effort<select className="field mt-1" value={maxNodes} onChange={e => onOptionsChange({ ...options, maxNodes: Number(e.target.value) })}>{SEARCH_NODES.map((value, i) => <option key={value} value={value}>{['Quick', 'Normal', 'Deep'][i]} · {value.toLocaleString()} nodes</option>)}</select></label>
       <label className="field-label sm:col-span-2">Extra words / names (optional)<textarea className="field mt-1 h-16 font-mono" value={customWords} onChange={e => onCustomWordsChange(e.target.value)} placeholder="Names or unusual words that may appear in this quote" /></label>
+      <div className="sm:col-span-2">
+        <label className="flex items-center gap-2 text-sm font-medium text-slate-700"><input type="checkbox" checked={options.allowJoinedWords ?? false} onChange={e => onOptionsChange({ ...options, allowJoinedWords: e.target.checked })} />Allow joined words</label>
+        <p className="mt-1 text-xs text-slate-500">Try two common words of at least three letters joined in one slot, such as RAIN + COAT. Extra words can supply rare components. Adds search work and may suggest unlisted combinations.</p>
+      </div>
       <p className="text-xs text-slate-500 sm:col-span-2">More ? means more possible answers. Known letters narrow the search. You can stop at any time; a time or effort limit returns the best candidates found so far.</p>
     </div>
     <div className="mt-6 flex items-center justify-between gap-4 border-t border-slate-100 pt-5">

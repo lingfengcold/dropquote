@@ -50,7 +50,9 @@ scope.onmessage = async ({ data }) => {
     }, { load_system_dawg: '0', load_freq_dawg: '0', load_number_dawg: '0' });
     if (failed || cancelled) return;
     await engine.setParameters({
-      tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+      // Dropquote screenshots also use lowercase fonts. Restricting recognition to
+      // uppercase glyphs silently discards d/a/r/etc.; normalize case after recognition.
+      tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz',
       // SINGLE_BLOCK preserves isolated characters within grid rows. SPARSE_TEXT can
       // silently discard a lone A/I as a small text fragment, even on a clean scan.
       tessedit_pageseg_mode: PSM.SINGLE_BLOCK,

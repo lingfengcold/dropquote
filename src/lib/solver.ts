@@ -13,6 +13,7 @@ export interface SolverResult {
   validWords: string[];
   text: string;
   rareWords: string[];
+  joinedWords: { word: string; parts: [string, string] }[];
   resolvedUnknowns: { col: number; letters: string[] }[];
 }
 
@@ -35,6 +36,7 @@ export interface SolverOptions {
   maxResults?: number;
   fixedLetters?: (string | null)[][];
   customWords?: string[];
+  allowJoinedWords?: boolean;
   onProgress?: (progress: SolverProgress) => void;
 }
 
@@ -100,6 +102,7 @@ function buildTrie(words: WordPrior[], shouldStop: () => boolean): WordTrie | nu
 export class DropQuoteSolver {
   private byLength = new Map<number, WordPrior[]>();
   private tries = new Map<number, WordTrie>();
+  private joinedTries = new Map<number, WordTrie>();
   private language: LanguageModel;
 
   constructor(dictionaryWords: string[], commonWords: Set<string> | string[] = new Set()) {
@@ -219,22 +222,48 @@ export class DropQuoteSolver {
       bucket.set(word, this.language.prior(word, true));
       customByLength.set(word.length, bucket);
     }
-    const neededTries = new Map<number, WordTrie>();
-    for (const slot of slots) {
-      const length = slot.cells.length;
-      if (neededTries.has(length)) continue;
-      let trie = customByLength.has(length) ? undefined : this.tries.get(length);
+    const neededTries = new Map<number, WordTrie | null>();
+    const partTries = new Map<number, WordTrie | null>();
+    const getTrie = (length: number, joinedPart = false): WordTrie | null => {
+      const localCache = joinedPart ? partTries : neededTries;
+      const persistentCache = joinedPart ? this.joinedTries : this.tries;
+      if (localCache.has(length)) return localCache.get(length)!;
+      let trie = customByLength.has(length) ? undefined : persistentCache.get(length);
       if (!trie) {
         let words = this.byLength.get(length) ?? [];
         const custom = customByLength.get(length);
         if (custom) words = [...new Map([...words.map(word => [word.word, word] as const), ...custom]).values()].sort(compareWords);
-        if (!words.length) return finish();
+        // Missing-separator inference is intentionally conservative. Rare full
+        // words remain valid, but do not generate arbitrary rare-word pairs.
+        // Explicit custom words have a prior >= 2.7 and remain eligible parts.
+        if (joinedPart) words = words.filter(word => word.score >= 2);
+        if (!words.length) { localCache.set(length, null); return null; }
         const built = buildTrie(words, timeExpired);
-        if (!built) return finish();
+        if (!built) return null;
         trie = built;
-        if (!custom) this.tries.set(length, trie);
+        if (!custom) persistentCache.set(length, trie);
       }
-      neededTries.set(length, trie);
+      localCache.set(length, trie);
+      return trie;
+    };
+    const joinedSplits = new Map<number, number[]>();
+    const lengths = new Set([...this.byLength.keys(), ...customByLength.keys()]);
+    const partLengths = [...lengths].filter(length => length >= 3 && (customByLength.has(length) || this.byLength.get(length)?.some(word => word.score >= 2))).sort((a, b) => a - b);
+    const eligiblePartLengths = new Set(partLengths);
+    for (const slot of slots) {
+      const length = slot.cells.length;
+      const trie = getTrie(length);
+      if (status !== 'complete') return finish();
+      if (options.allowJoinedWords && !joinedSplits.has(length)) {
+        const splits = partLengths.filter(part => part <= length - 3 && eligiblePartLengths.has(length - part));
+        joinedSplits.set(length, splits);
+        for (const split of splits) {
+          getTrie(split, true);
+          getTrie(length - split, true);
+          if (timeExpired()) return finish();
+        }
+      }
+      if (!trie && !joinedSplits.get(length)?.length) return finish();
     }
 
     const available = original.slice();
@@ -246,30 +275,114 @@ export class DropQuoteSolver {
       const domainKey = slot.columns.map((col, index) => `${col}:${slot.fixed[index] ?? ''}`).join('|');
       const cachedDomain = domainCache.get(domainKey);
       if (cachedDomain) { domains.push(cachedDomain); continue; }
-      const trie = neededTries.get(slot.cells.length)!;
+      const trie = neededTries.get(slot.cells.length);
       const domain: WordPrior[] = [];
-      const visitPrefix = (parent: number, depth: number) => {
-        if ((prefixChecks++ & 255) === 0 && timeExpired()) return;
-        if (depth === slot.cells.length) {
-          const id = trie.terminal[parent];
-          if (id !== -1) domain.push(trie.words[id]);
-          return;
-        }
-        const col = slot.columns[depth];
-        const locked = slot.fixed[depth];
-        for (let node = trie.firstChild[parent]; node !== -1; node = trie.nextSibling[node]) {
+      if (trie) {
+        const parents = new Int32Array(slot.cells.length + 1);
+        const next = new Int32Array(slot.cells.length + 1);
+        const consumed = new Int32Array(slot.cells.length + 1);
+        let depth = 0;
+        next[0] = trie.firstChild[0];
+        const popPrefix = () => {
+          const key = consumed[depth--];
+          if (key < 0) unknowns[-key - 1]++;
+          else if (key > 0) available[key - 1]++;
+        };
+        while (depth >= 0) {
+          if ((prefixChecks++ & 255) === 0 && timeExpired()) break;
+          if (depth === slot.cells.length) {
+            const id = trie.terminal[parents[depth]];
+            if (id !== -1) {
+              if (options.allowJoinedWords) {
+                if (nodeLimitReached()) break;
+                nodesVisited++;
+              }
+              domain.push(trie.words[id]);
+            }
+            popPrefix();
+            continue;
+          }
+          const node = next[depth];
+          if (node === -1) { popPrefix(); continue; }
+          next[depth] = trie.nextSibling[node];
           const code = trie.letter[node];
+          const col = slot.columns[depth];
+          const locked = slot.fixed[depth];
           if (locked !== null && locked !== code) continue;
           const key = col * 26 + code;
           const useUnknown = available[key] === 0;
           if (useUnknown && unknowns[col] === 0) continue;
           if (useUnknown) unknowns[col]--; else available[key]--;
-          visitPrefix(node, depth + 1);
-          if (useUnknown) unknowns[col]++; else available[key]++;
-          if (status !== 'complete') return;
+          depth++;
+          consumed[depth] = useUnknown ? -col - 1 : key + 1;
+          parents[depth] = node;
+          next[depth] = trie.firstChild[node];
         }
-      };
-      visitPrefix(0, 0);
+        while (depth >= 0) popPrefix();
+      }
+      if (options.allowJoinedWords && status === 'complete') {
+        const seen = new Set(domain.map(candidate => candidate.word));
+        for (const split of joinedSplits.get(slot.cells.length) ?? []) {
+          const firstTrie = partTries.get(split)!;
+          const secondTrie = partTries.get(slot.cells.length - split)!;
+          if (!firstTrie || !secondTrie) continue;
+          // Keep both component paths on an explicit stack: a valid custom word
+          // may span thousands of cells, beyond a browser's recursive call limit.
+          interface PartFrame {
+            trie: WordTrie;
+            parent: number;
+            depth: number;
+            first: WordPrior | null;
+            next: number;
+            consumed: number | null;
+            terminalDone: boolean;
+          }
+          const frames: PartFrame[] = [];
+          const pushFrame = (trie: WordTrie, parent: number, depth: number, first: WordPrior | null, consumed: number | null) => {
+            frames.push({ trie, parent, depth, first, next: trie.firstChild[parent], consumed, terminalDone: false });
+          };
+          const popFrame = () => {
+            const consumed = frames.pop()!.consumed;
+            if (consumed !== null) {
+              if (consumed < 0) unknowns[-consumed - 1]++;
+              else available[consumed]++;
+            }
+          };
+          pushFrame(firstTrie, 0, 0, null, null);
+          while (frames.length && !timeExpired()) {
+            const frame = frames[frames.length - 1];
+            const offset = frame.first === null ? 0 : split;
+            const length = frame.first === null ? split : slot.cells.length - split;
+            if (frame.depth === length) {
+              if (frame.terminalDone || frame.trie.terminal[frame.parent] === -1) { popFrame(); continue; }
+              frame.terminalDone = true;
+              if (nodeLimitReached()) break;
+              nodesVisited++;
+              const word = frame.trie.words[frame.trie.terminal[frame.parent]];
+              if (frame.first === null) pushFrame(secondTrie, 0, 0, word, null);
+              else if (!seen.has(frame.first.word + word.word)) {
+                seen.add(frame.first.word + word.word);
+                domain.push(this.language.joined(frame.first, word));
+              }
+              continue;
+            }
+            const node = frame.next;
+            if (node === -1) { popFrame(); continue; }
+            frame.next = frame.trie.nextSibling[node];
+            const code = frame.trie.letter[node];
+            const col = slot.columns[offset + frame.depth];
+            const locked = slot.fixed[offset + frame.depth];
+            if (locked !== null && locked !== code) continue;
+            const key = col * 26 + code;
+            const useUnknown = available[key] === 0;
+            if (useUnknown && unknowns[col] === 0) continue;
+            if (useUnknown) unknowns[col]--; else available[key]--;
+            pushFrame(frame.trie, node, frame.depth + 1, frame.first, useUnknown ? -col - 1 : key);
+          }
+          while (frames.length) popFrame();
+          if (status !== 'complete') break;
+        }
+      }
       if (status !== 'complete') return finish();
       if (!domain.length) return finish();
       domain.sort(comparePriors);
@@ -281,6 +394,8 @@ export class DropQuoteSolver {
     phase = 'searching';
     reportProgress(true);
     const assigned: (WordPrior | null)[] = slots.map(() => null);
+    let joinedUsed = 0;
+    let joinedLimit = 0;
     const scratch = new Int32Array(original.length);
     const stamps = new Float64Array(original.length);
     const deficits = new Int32Array(cols);
@@ -318,27 +433,36 @@ export class DropQuoteSolver {
       const next = previous.slice();
       const support = new Int32Array(original.length);
       let checks = 0;
+      let requiredJoined = 0;
+      let possibleJoined = 0;
       for (let index = 0; index < slots.length; index++) {
         if (assigned[index]) continue;
         const slot = slots[index];
         const filtered: WordPrior[] = [];
+        let hasOrdinary = false;
+        let hasJoined = false;
         usageKeys.length = 0;
         for (const candidate of previous[index]) {
           if ((checks++ & 255) === 0 && timeExpired()) {
             for (const key of usageKeys) maxUsage[key] = 0;
             return null;
           }
+          if (candidate.joinedFrom && joinedUsed >= joinedLimit) continue;
           if (!fits(candidate.word, slot)) continue;
           filtered.push(candidate);
+          if (candidate.joinedFrom) hasJoined = true; else hasOrdinary = true;
           for (const key of scratchKeys) {
             if (maxUsage[key] === 0) usageKeys.push(key);
             if (scratch[key] > maxUsage[key]) maxUsage[key] = scratch[key];
           }
         }
         if (!filtered.length) return null;
+        if (!hasOrdinary) requiredJoined++;
+        if (hasJoined) possibleJoined++;
         next[index] = filtered.length === previous[index].length ? previous[index] : filtered;
         for (const key of usageKeys) { support[key] += maxUsage[key]; maxUsage[key] = 0; }
       }
+      if (joinedUsed + requiredJoined > joinedLimit || joinedUsed + possibleJoined < joinedLimit) return null;
       for (const key of actualLetterKeys) if (available[key] > support[key]) return null;
       return next;
     };
@@ -365,7 +489,8 @@ export class DropQuoteSolver {
         }
         resolvedUnknowns.push({ col, letters });
       }
-      const result = { grid, score, validWords: words, text: words.join(' '), rareWords: assigned.filter(word => word!.rare).map(word => word!.word), resolvedUnknowns };
+      const joinedWords: SolverResult['joinedWords'] = assigned.flatMap(word => word!.joinedFrom ? [{ word: word!.word, parts: word!.joinedFrom }] : []);
+      const result = { grid, score, validWords: words, text: words.join(' '), rareWords: assigned.filter(word => word!.rare).map(word => word!.word), joinedWords, resolvedUnknowns };
       let low = 0;
       let high = results.length;
       while (low < high) {
@@ -392,9 +517,11 @@ export class DropQuoteSolver {
         else { unknowns[col]--; consumed.push(-col - 1); }
       }
       assigned[index] = candidate;
+      if (candidate.joinedFrom) joinedUsed++;
       return consumed;
     };
     const undo = (index: number, consumed: number[]) => {
+      if (assigned[index]?.joinedFrom) joinedUsed--;
       assigned[index] = null;
       for (const key of consumed) {
         if (key < 0) unknowns[-key - 1]++;
@@ -403,7 +530,7 @@ export class DropQuoteSolver {
     };
 
     const search = (remaining: number, currentDomains: WordPrior[][], score: number) => {
-      if (remaining === 0) { saveResult(score); return; }
+      if (remaining === 0) { if (joinedUsed === joinedLimit) saveResult(score); return; }
       if (nodeLimitReached()) return;
       const forced: { index: number; consumed: number[] }[] = [];
       try {
@@ -416,6 +543,7 @@ export class DropQuoteSolver {
             if (nodeLimitReached()) return;
             nodesVisited++;
             const candidate = currentDomains[index][0];
+            if (candidate.joinedFrom && joinedUsed >= joinedLimit) return;
             if (!fits(candidate.word, slots[index])) return;
             score += contextualScore(candidate, index);
             forced.push({ index, consumed: consume(index, candidate) });
@@ -423,7 +551,7 @@ export class DropQuoteSolver {
             added++;
           }
           if (!added) break;
-          if (remaining === 0) { saveResult(score); return; }
+          if (remaining === 0) { if (joinedUsed === joinedLimit) saveResult(score); return; }
           const nextDomains = propagate(currentDomains);
           if (!nextDomains) return;
           currentDomains = nextDomains;
@@ -447,6 +575,7 @@ export class DropQuoteSolver {
           candidates = candidates.slice().sort((a, b) => contextualScore(b, chosen) - contextualScore(a, chosen) || compareWords(a, b));
         }
         for (const candidate of candidates) {
+          if (candidate.joinedFrom && joinedUsed >= joinedLimit) continue;
           if (nodeLimitReached()) return;
           nodesVisited++;
           if (!fits(candidate.word, slot)) continue;
@@ -464,8 +593,17 @@ export class DropQuoteSolver {
         for (let index = forced.length - 1; index >= 0; index--) undo(forced[index].index, forced[index].consumed);
       }
     };
-    const initialDomains = propagate(domains);
-    if (initialDomains) search(slots.length, initialDomains, 0);
+    // Missing separators are hypotheses. Try fewer inferred joins first, sharing
+    // one global budget and top-K, rather than getting trapped in many arbitrary
+    // joins before testing a solution that needs only one. Each completed result
+    // belongs to exactly one pass, so candidates are never duplicated.
+    const maximumJoined = options.allowJoinedWords ? domains.filter(domain => domain.some(word => word.joinedFrom)).length : 0;
+    for (joinedLimit = 0; joinedLimit <= maximumJoined; joinedLimit++) {
+      if (nodeLimitReached()) break;
+      const initialDomains = propagate(domains);
+      if (initialDomains) search(slots.length, initialDomains, 0);
+      if (status !== 'complete') break;
+    }
     if (timeExpired()) return finish();
     return finish();
   }

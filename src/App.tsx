@@ -58,6 +58,7 @@ function Results({ report, puzzle, onEdit, onAgain, onNew, canSearchLonger }: { 
         </div>
         {(result.resolvedUnknowns ?? []).some(col => col.letters.length) && <div className="mt-4 rounded-lg bg-blue-50 p-3 text-sm text-blue-900"><h4 className="font-semibold">Letters supplied for ?</h4><div className="mt-1 flex flex-wrap gap-x-5 gap-y-1">{result.resolvedUnknowns.filter(col => col.letters.length).map(col => <span key={col.col}>Column {col.col + 1}: <strong className="font-mono">{col.letters.join(' ')}</strong></span>)}</div></div>}
         {(result.rareWords ?? []).length > 0 && <p className="mt-4 text-xs leading-relaxed text-slate-500">Less common words to review: {result.rareWords.join(', ')}.</p>}
+        {(result.joinedWords ?? []).length > 0 && <p className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Joined word candidates to review: <strong>{result.joinedWords.map(item => `${item.word} (${item.parts.join(' + ')})`).join(', ')}</strong>. These combine two dictionary entries and may not be listed words themselves.</p>}
         <p className="mt-4 text-xs leading-relaxed text-slate-500">Scores rank candidates for this puzzle using word frequency and neighboring words; they are not probabilities or a guarantee of the intended quote.</p>
       </article>
     </div>}
@@ -129,7 +130,7 @@ function App() {
       {step === 'results' && solver.report && <Results report={solver.report} puzzle={puzzle} onEdit={() => setStep('grid')} onNew={newPuzzle} canSearchLonger={solver.ready && ((lastOptions.timeLimitMs ?? 30000) < 120000 || (lastOptions.maxNodes ?? 1000000) < 5000000)} onAgain={() => solve({ ...lastOptions, timeLimitMs: nextSearchSeconds((lastOptions.timeLimitMs ?? 30000) / 1000) * 1000, maxNodes: nextSearchNodes(lastOptions.maxNodes ?? 1000000) })} />}
       {step === 'results' && !solver.report && <div className="panel mx-auto max-w-xl p-6"><button className="btn-secondary" onClick={() => setStep('grid')}>Back to puzzle</button></div>}
     </main>
-    <footer className="mx-auto mt-10 max-w-6xl px-5 pb-6 text-xs leading-relaxed text-slate-500">Your puzzle and images stay in this browser. OCR downloads its engine and English language data on first use. Word-frequency data: <a className="underline" href="https://github.com/rspeer/wordfreq">wordfreq by Robyn Speer</a> (<a className="underline" href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>); <a className="underline" href="https://github.com/lingfengcold/dropquote/tree/main/src/data">attribution and data license</a>.</footer>
+    <footer className="mx-auto mt-10 max-w-6xl px-5 pb-6 text-xs leading-relaxed text-slate-500">Your puzzle and images stay in this browser. OCR downloads its engine and English language data on first use. Word-frequency data: <a className="underline" href="https://github.com/rspeer/wordfreq">wordfreq by Robyn Speer</a> (<a className="underline" href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>). Additional vocabulary: <a className="underline" href="https://github.com/wordnik/wordlist">Wordnik (MIT)</a>. <a className="underline" href="https://github.com/lingfengcold/dropquote/tree/main/src/data">Attribution and data licenses</a>.</footer>
   </div>;
 }
 

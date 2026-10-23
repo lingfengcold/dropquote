@@ -40,6 +40,7 @@ export interface WordPrior {
   word: string;
   score: number;
   rare: boolean;
+  joinedFrom?: [string, string];
 }
 
 export function normalizeWord(value: string): string | null {
@@ -72,6 +73,12 @@ export class LanguageModel {
     if (word.length <= 3 && !/[AEIOU]/.test(word) && !SHORT_WITHOUT_VOWELS.has(word) && !custom) score -= 1.8;
     if (word.length <= 2 && coreRank === undefined && rank === undefined && !custom) score -= 0.8;
     return { word, score, rare: !custom && coreRank === undefined && score < 2.7 };
+  }
+
+  joined(left: WordPrior, right: WordPrior): WordPrior {
+    // A possible missing separator is a hypothesis, not an observed high-frequency
+    // word. Never add the two component frequencies as if they proved a compound.
+    return { word: left.word + right.word, score: Math.min(0.6, Math.min(left.score, right.score) * 0.1), rare: true, joinedFrom: [left.word, right.word] };
   }
 }
 

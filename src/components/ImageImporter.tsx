@@ -33,7 +33,7 @@ export function ImageImporter({ numColumns, maxLettersPerColumn, onImport, onClo
   const [loadingImage, setLoadingImage] = useState(false);
   const [crop, setCrop] = useState<Crop>(FULL_CROP);
   const [guideText, setGuideText] = useState('');
-  const [removeLines, setRemoveLines] = useState(false);
+  const [removeLines, setRemoveLines] = useState(true);
   const [mode, setMode] = useState<'columns' | 'grid'>('columns');
   const [processing, setProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -237,7 +237,7 @@ export function ImageImporter({ numColumns, maxLettersPerColumn, onImport, onClo
           <button onClick={close} aria-label="Close image importer" className="p-1 hover:bg-gray-100 rounded"><X size={24} /></button>
         </div>
         <div className="min-h-0 overflow-y-auto p-4 sm:p-6">
-        <p className="text-sm text-gray-600 mb-4">Select only the upper letter bank. Align the column guides with the puzzle columns; unequal column heights and blank spaces are preserved by position. Recognition runs in your browser. The first use downloads the OCR engine and English data.</p>
+        <p className="text-sm text-gray-600 mb-4">Select only the letter bank, excluding the answer grid and instructions. Align the column guides with the puzzle columns; unequal column heights and blank spaces are preserved by position. Recognition runs in your browser. The first use downloads the OCR engine and English data.</p>
         <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageUpload} aria-label="Upload puzzle image" />
         <button onClick={() => fileInputRef.current?.click()} disabled={processing || loadingImage} className="border border-dashed border-blue-400 rounded-md px-4 py-3 text-blue-700 hover:bg-blue-50 flex items-center gap-2 disabled:opacity-50"><Upload size={20} />{loadingImage ? 'Opening image…' : image ? 'Choose another image' : 'Upload image'}</button>
         {image && (

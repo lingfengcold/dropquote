@@ -40,10 +40,36 @@ The resulting asset has **297,822 entries**, **2,466,090 uncompressed bytes** an
 **1,215,048 gzip bytes**. `lexicon-manifest.json` records the source revision,
 checksums, transformation and output sizes.
 
-`loadLexicon()` decodes the compressed, inline Vite asset inside the solver
+## General dictionary supplement (MIT)
+
+Frequency data alone is not a complete dictionary. `english-wordnik-tail.txt.gz`
+adds **98,554 unranked entries** from **Wordnik**, without artificially promoting
+these uncommon words into the corpus frequency list. Its source is the
+[Wordnik wordlist](https://github.com/wordnik/wordlist), file
+`wordlist-20210729.txt`, pinned to commit
+[`46e6215d0f90356afe9c8ba4be347e7e98cb425c`](https://github.com/wordnik/wordlist/tree/46e6215d0f90356afe9c8ba4be347e7e98cb425c).
+**Copyright (c) 2020 Wordnik.** This separate dictionary supplement is available
+under the **MIT License**, preserved in `wordnik-LICENSE.txt`.
+
+The 198,422 quoted source entries are decoded, normalized to uppercase ASCII
+letters with apostrophes and hyphens removed, and deduplicated. Single letters are
+limited to A/I/O, as in the ranked layer. Words already in wordfreq are removed;
+the remaining general vocabulary is sorted alphabetically, not by frequency.
+The tail contains **1,042,139 uncompressed bytes** and **296,772 gzip bytes**.
+`wordnik-manifest.json` records the source hashes, normalization, overlap
+dependency and output hashes. This is a general dictionary supplement rather
+than a list of special-cased puzzle answers.
+
+Together, the layers provide **396,376 distinct entries**, including **297,822
+corpus-ranked entries** and **98,554 dictionary-only entries**; compressed data
+totals **1,511,820 bytes**. Their separate licenses and source notices are retained.
+
+`loadLexicon()` decodes both compressed, inline Vite assets inside the solver
 worker. It makes **no dictionary network request** and works with GitHub Pages
-subdirectory deployment. Both `words` and `rankedWords` refer to the same array in
-descending frequency order. Consumers must not sort or modify it in place.
+subdirectory deployment. `words` includes both layers; `rankedWords` includes
+**only wordfreq's ranked entries**. Consumers must not sort or modify either in
+place. The shared pure `mergeLexiconLayers` function is also used by integration
+tests and benchmarks so they exercise the same dictionary as the browser.
 This is a frequency prior, not a complete sentence language model: names and
 abbreviations still occur in corpus data, and uncommon but correct answers remain
 possible. Puzzle-specific extra vocabulary can be supplied separately.
@@ -54,19 +80,24 @@ From the repository root, run:
 
 ```sh
 python scripts/build-lexicon.py
+python scripts/build-wordnik-tail.py
 ```
 
-Only Python 3's standard library is required. This development script downloads
-the fixed English source (about 1.5 MB) and upstream notices, verifies every
-SHA-256 hash, and rewrites the derived asset and manifest. It uses a temporary
-source cache. For a fully offline rebuild, supply a directory containing the
-original `large_en.msgpack.gz`, `NOTICE.md` and `LICENSE.txt` files:
+Only Python 3's standard library is required. The scripts download the fixed
+English frequency source (about 1.5 MB), Wordnik source (about 2.4 MB) and upstream
+notices, verify every SHA-256 hash, and rewrite the derived assets and manifests.
+Rebuild wordfreq first because the tail excludes its vocabulary. Temporary source
+caches are used. For fully offline rebuilds, provide a directory with the original
+`large_en.msgpack.gz`, `NOTICE.md` and `LICENSE.txt` files, and a second directory
+with Wordnik's `wordlist-20210729.txt` and `LICENSE`:
 
 ```sh
 python scripts/build-lexicon.py --source-dir /path/to/source-cache
+python scripts/build-wordnik-tail.py --source-dir /path/to/wordnik-cache
 ```
 
-Rebuilding does not use the current upstream branch, an unpinned package, or the
+The Wordnik builder also accepts `--proxy http://127.0.0.1:PORT` when source
+downloads require a proxy. Rebuilding does not use the current upstream branch, an unpinned package, or the
 network during normal application startup. Rebuilding with the same pinned inputs
 reproduces the same data checksums. Tesseract's OCR model distribution is separate
 from this vocabulary asset.

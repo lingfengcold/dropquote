@@ -6,3 +6,8 @@ export function parseLexiconText(text: string): string[] {
   }
   return words;
 }
+
+/** Supplement dictionary coverage without inventing corpus ranks for rare words. */
+export function mergeLexiconLayers(rankedWords: string[], extraWords: string[]): { words: string[]; rankedWords: string[] } {
+  return { words: [...new Set([...rankedWords, ...extraWords])], rankedWords };
+}
