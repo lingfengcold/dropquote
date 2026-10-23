@@ -1,5 +1,7 @@
-// A deliberately small, offline language model. A ranked frequency list supplies
-// the main signal; contextual rules only break close ties, never exclude words.
+import { MAX_CONTEXT_SCORE } from './contextModel';
+
+// Offline word-frequency priors, corpus context and soft grammatical penalties.
+// None of these scores excludes a dictionary word from the constraint search.
 const CORE_WORDS = (`THE OF AND TO A IN IS IT YOU THAT HE WAS FOR ON ARE AS WITH HIS
   THEY I AT BE THIS HAVE FROM OR ONE HAD BY WORD BUT NOT WHAT ALL WERE WE WHEN YOUR
   CAN SAID THERE USE AN EACH WHICH SHE DO HOW THEIR IF WILL UP OTHER ABOUT OUT MANY
@@ -53,13 +55,19 @@ export class LanguageModel {
   private coreRanks = new Map(CORE_WORDS.map((word, index) => [word, index + 1]));
   private ranked: boolean;
 
-  constructor(commonWords: Set<string> | string[] = []) {
+  constructor(commonWords: Set<string> | string[] = [], private contextScore?: (left: string, right: string) => number) {
     this.ranked = Array.isArray(commonWords);
     let rank = 1;
     for (const item of commonWords) {
       const word = normalizeWord(item);
       if (word && !this.ranks.has(word)) this.ranks.set(word, rank++);
     }
+  }
+
+  get maxPairScore() { return MAX_PAIR_SCORE + (this.contextScore ? MAX_CONTEXT_SCORE : 0); }
+
+  adjacent(left: string, right: string): number {
+    return adjacentWordScore(left, right) + (this.contextScore?.(left, right) ?? 0);
   }
 
   prior(word: string, custom = false): WordPrior {

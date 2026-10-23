@@ -1,5 +1,9 @@
 import { DropQuoteSolver } from '../lib/solver';
 import { loadLexicon } from '../data/lexicon';
+import { loadContextScore } from '../data/context';
+import loadHighs from 'highs';
+import highsWasmUrl from 'highs/runtime?url';
+import { createWordOptimizer } from '../lib/wordOptimizer';
 import { parsePuzzle } from '../lib/puzzle';
 import type { SolverRequest, SolverResponse } from '../lib/solverProtocol';
 
@@ -9,8 +13,10 @@ const scope = self as unknown as {
 };
 let initialization: Promise<DropQuoteSolver> | undefined;
 function initialize() {
-  initialization ??= loadLexicon().then(data => {
-    const solver = new DropQuoteSolver(data.words, data.rankedWords);
+  initialization ??= Promise.all([
+    loadLexicon(), loadContextScore(), loadHighs({ locateFile: () => highsWasmUrl }),
+  ]).then(([data, contextScore, highs]) => {
+    const solver = new DropQuoteSolver(data.words, data.rankedWords, { contextScore, optimizer: createWordOptimizer(highs) });
     scope.postMessage({ type: 'ready', wordCount: data.words.length });
     return solver;
   });

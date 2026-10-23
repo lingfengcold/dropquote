@@ -1,4 +1,5 @@
-import { adjacentWordScore, LanguageModel, MAX_PAIR_SCORE, normalizeWord, type WordPrior } from './languageModel';
+import { LanguageModel, normalizeWord, type WordPrior } from './languageModel';
+import type { WordOptimizer } from './wordOptimizer';
 
 export interface GridCell {
   row: number;
@@ -105,8 +106,11 @@ export class DropQuoteSolver {
   private joinedTries = new Map<number, WordTrie>();
   private language: LanguageModel;
 
-  constructor(dictionaryWords: string[], commonWords: Set<string> | string[] = new Set()) {
-    this.language = new LanguageModel(commonWords);
+  constructor(dictionaryWords: string[], commonWords: Set<string> | string[] = new Set(), private resources: {
+    contextScore?: (left: string, right: string) => number;
+    optimizer?: WordOptimizer;
+  } = {}) {
+    this.language = new LanguageModel(commonWords, resources.contextScore);
     const seen = new Set<string>();
     for (const value of [...dictionaryWords, 'A', 'I']) {
       const word = normalizeWord(value);
@@ -467,11 +471,15 @@ export class DropQuoteSolver {
       return next;
     };
 
+    const seenResults = new Set<string>();
     const saveResult = (score: number) => {
+      const words = assigned.map(word => word!.word);
+      const text = words.join(' ');
+      if (seenResults.has(text)) return;
       solutionsFound++;
       if (results.length >= maxResults && score < results[results.length - 1].score) return;
+      seenResults.add(text);
       const grid = Array.from({ length: rows }, () => Array<string>(cols).fill(''));
-      const words = assigned.map(word => word!.word);
       const used = new Int32Array(original.length);
       for (const slot of slots) {
         const word = words[slot.index];
@@ -490,7 +498,7 @@ export class DropQuoteSolver {
         resolvedUnknowns.push({ col, letters });
       }
       const joinedWords: SolverResult['joinedWords'] = assigned.flatMap(word => word!.joinedFrom ? [{ word: word!.word, parts: word!.joinedFrom }] : []);
-      const result = { grid, score, validWords: words, text: words.join(' '), rareWords: assigned.filter(word => word!.rare).map(word => word!.word), joinedWords, resolvedUnknowns };
+      const result = { grid, score, validWords: words, text, rareWords: assigned.filter(word => word!.rare).map(word => word!.word), joinedWords, resolvedUnknowns };
       let low = 0;
       let high = results.length;
       while (low < high) {
@@ -500,12 +508,12 @@ export class DropQuoteSolver {
         else high = middle;
       }
       results.splice(low, 0, result);
-      if (results.length > maxResults) results.pop();
+      if (results.length > maxResults) seenResults.delete(results.pop()!.text);
     };
 
     const contextualScore = (candidate: WordPrior, index: number) => candidate.score
-      + (index > 0 && assigned[index - 1] ? adjacentWordScore(assigned[index - 1]!.word, candidate.word) : 0)
-      + (index + 1 < slots.length && assigned[index + 1] ? adjacentWordScore(candidate.word, assigned[index + 1]!.word) : 0);
+      + (index > 0 && assigned[index - 1] ? this.language.adjacent(assigned[index - 1]!.word, candidate.word) : 0)
+      + (index + 1 < slots.length && assigned[index + 1] ? this.language.adjacent(candidate.word, assigned[index + 1]!.word) : 0);
 
     const consume = (index: number, candidate: WordPrior): number[] => {
       const consumed: number[] = [];
@@ -528,6 +536,81 @@ export class DropQuoteSolver {
         else available[key]++;
       }
     };
+
+    // Use the actual remaining neighbors when one side is known. Applying the
+    // corpus-wide maximum to every edge makes the bound too loose on small grids.
+    const neighborBounds = new WeakMap<WordPrior[], Map<string, number>>();
+    const pairBounds = new WeakMap<WordPrior[], WeakMap<WordPrior[], number>>();
+    const edgeBound = (leftIndex: number, current: WordPrior[][]): number => {
+      const rightIndex = leftIndex + 1;
+      const left = assigned[leftIndex];
+      const right = assigned[rightIndex];
+      if (left && right) return 0;
+      if (left || right) {
+        const domain = current[left ? rightIndex : leftIndex];
+        const key = `${left ? 'L' : 'R'}:${(left ?? right)!.word}`;
+        let cache = neighborBounds.get(domain);
+        if (!cache) { cache = new Map(); neighborBounds.set(domain, cache); }
+        const cached = cache.get(key);
+        if (cached !== undefined) return cached;
+        let best = -Infinity;
+        let checks = 0;
+        for (const candidate of domain) {
+          if ((checks++ & 255) === 0 && timeExpired()) return this.language.maxPairScore;
+          best = Math.max(best, left ? this.language.adjacent(left.word, candidate.word)
+            : this.language.adjacent(candidate.word, right!.word));
+        }
+        cache.set(key, best);
+        return best;
+      }
+      const leftDomain = current[leftIndex];
+      const rightDomain = current[rightIndex];
+      if (leftDomain.length * rightDomain.length > 400) return this.language.maxPairScore;
+      let cache = pairBounds.get(leftDomain);
+      if (!cache) { cache = new WeakMap(); pairBounds.set(leftDomain, cache); }
+      const cached = cache.get(rightDomain);
+      if (cached !== undefined) return cached;
+      let best = -Infinity;
+      for (const a of leftDomain) for (const b of rightDomain) best = Math.max(best, this.language.adjacent(a.word, b.word));
+      cache.set(rightDomain, best);
+      return best;
+    };
+
+    // Find promising complete assignments before DFS explores all the short-word
+    // permutations. The optimizer is a bounded heuristic over progressively wider
+    // domains; only the subsequent full-domain search can establish completion.
+    if (this.resources.optimizer && slots.length >= 12 && domains.some(domain => domain.length > 100) && !nodeLimitReached()) {
+      const seedDeadline = Math.min(started + timeLimit * 0.65, now() + 6_000);
+      const beforeNodes = nodesVisited;
+      const optimized = this.resources.optimizer({
+        domains,
+        columns: slots.map(slot => slot.columns),
+        counts: original,
+        unknowns: originalUnknowns,
+        scorePair: (left, right) => this.language.adjacent(left, right),
+        maxResults,
+        getBudget: () => ({ timeLimitMs: Math.max(0, seedDeadline - now()), maxNodes: Math.max(0, maxNodes - nodesVisited) }),
+        onProgress: nodes => { nodesVisited = beforeNodes + nodes; reportProgress(); },
+        onSolution: candidates => {
+          if (candidates.length !== slots.length) return;
+          const consumed: { index: number; keys: number[] }[] = [];
+          let score = 0;
+          try {
+            for (let index = 0; index < candidates.length; index++) {
+              const candidate = candidates[index];
+              if (!domains[index].includes(candidate) || candidate.joinedFrom || !fits(candidate.word, slots[index])) return;
+              score += contextualScore(candidate, index);
+              consumed.push({ index, keys: consume(index, candidate) });
+            }
+            saveResult(score);
+          } finally {
+            for (let index = consumed.length - 1; index >= 0; index--) undo(consumed[index].index, consumed[index].keys);
+          }
+        },
+      });
+      nodesVisited = beforeNodes + optimized.nodesVisited;
+      reportProgress(true);
+    }
 
     const search = (remaining: number, currentDomains: WordPrior[][], score: number) => {
       if (remaining === 0) { if (joinedUsed === joinedLimit) saveResult(score); return; }
@@ -559,12 +642,13 @@ export class DropQuoteSolver {
         let chosen = -1;
         let upperBound = score;
         for (let index = 0; index < slots.length; index++) {
+          if ((index & 63) === 0 && timeExpired()) return;
           if (!assigned[index]) {
             if (chosen === -1 || currentDomains[index].length < currentDomains[chosen].length
               || (currentDomains[index].length === currentDomains[chosen].length && slots[index].cells.length > slots[chosen].cells.length)) chosen = index;
             upperBound += currentDomains[index][0].score;
           }
-          if (index > 0 && (!assigned[index - 1] || !assigned[index])) upperBound += MAX_PAIR_SCORE;
+          if (index > 0 && (!assigned[index - 1] || !assigned[index])) upperBound += edgeBound(index - 1, currentDomains);
         }
         if (results.length >= maxResults && upperBound < results[results.length - 1].score) return;
         const slot = slots[chosen];

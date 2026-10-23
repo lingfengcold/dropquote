@@ -4,3 +4,4 @@ src/data/wordfreq-NOTICE.md text eol=lf -whitespace
 src/data/wordfreq-LICENSE.txt text eol=lf -whitespace
 src/data/CC-BY-SA-4.0.txt text eol=lf -whitespace
 src/data/wordnik-LICENSE.txt text eol=lf -whitespace
+src/data/gutenberg-README.txt text eol=lf -whitespace

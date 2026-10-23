@@ -5,11 +5,17 @@ import test from 'node:test';
 import { DropQuoteSolver } from '../src/lib/solver.ts';
 import { mergeLexiconLayers, parseLexiconText } from '../src/data/lexiconParse.ts';
 import { parsePuzzle } from '../src/lib/puzzle.ts';
+import loadHighs from 'highs';
+import { createWordOptimizer } from '../src/lib/wordOptimizer.ts';
+import { createContextScore } from '../src/lib/contextModel.ts';
 
 // Use the actual distributed data, without injecting quote words or special ranks.
 const readLayer = (name: string) => parseLexiconText(gunzipSync(readFileSync(new URL(`../src/data/${name}.txt.gz`, import.meta.url))).toString('utf8'));
 const lexicon = mergeLexiconLayers(readLayer('english-wordfreq'), readLayer('english-wordnik-tail'));
-const solver = new DropQuoteSolver(lexicon.words, lexicon.rankedWords);
+const context = JSON.parse(gunzipSync(readFileSync(new URL('../src/data/english-context.json.gz', import.meta.url))).toString('utf8'));
+const solver = new DropQuoteSolver(lexicon.words, lexicon.rankedWords, {
+  contextScore: createContextScore(context), optimizer: createWordOptimizer(await loadHighs()),
+});
 
 function makePuzzle(text: string, cols: number, minimumRows = 1) {
   const rows = Math.max(minimumRows, Math.ceil(text.length / cols));
@@ -76,4 +82,20 @@ test('the supplied senses word-list puzzle is found using dictionary layers and 
   const rank = report.results.findIndex(result => result.text === answer);
   assert.ok(rank >= 0 && rank < 5, `expected senses answer in top 5; status=${report.status}, nodes=${report.stats.nodesVisited}, first=${report.results[0]?.text}`);
   assert.ok(report.results[rank].joinedWords.some(item => item.word === 'NOSECLIP' && item.parts.join('+') === 'NOSE+CLIP'));
+});
+
+test('the supplied 26-column quotation ranks first with all seven missing letters inferred', () => {
+  const puzzle = parsePuzzle(JSON.parse(readFileSync(new URL('./fixtures/wild-things.json', import.meta.url), 'utf8')));
+  const answer = 'HIS MOTHER CALLED HIM WILD THING AND MAX SAID ILL EAT YOU UP SO HE WAS SENT TO BED WITHOUT EATING ANYTHING THAT VERY NIGHT IN MAXS ROOM A FOREST GREW AND GREW AND GREW UNTIL HIS CEILING HUNG WITH VINES';
+  assert.ok(puzzle.fixedLetters.every(row => row.every(cell => cell === null)));
+  const report = solver.solve(puzzle.rows, puzzle.cols, puzzle.columnLetters, puzzle.blocks, {
+    timeLimitMs: 10_000, maxNodes: 1_000_000, maxResults: 20,
+  });
+  assert.equal(report.results[0]?.text, answer, `status=${report.status}; top=${report.results[0]?.text}`);
+  assert.equal(new Set(report.results.map(result => result.text)).size, report.results.length);
+  assert.deepEqual(report.results[0].resolvedUnknowns, [
+    { col: 1, letters: ['R'] }, { col: 4, letters: ['I'] }, { col: 12, letters: ['R'] },
+    { col: 13, letters: ['H'] }, { col: 17, letters: ['N'] }, { col: 18, letters: ['G'] }, { col: 20, letters: ['E'] },
+  ]);
+  assert.ok(report.stats.nodesVisited <= 1_000_000);
 });

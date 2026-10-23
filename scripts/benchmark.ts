@@ -4,11 +4,15 @@ import { gunzipSync } from 'node:zlib';
 import { DropQuoteSolver } from '../src/lib/solver.ts';
 import { mergeLexiconLayers, parseLexiconText } from '../src/data/lexiconParse.ts';
 import { parsePuzzle } from '../src/lib/puzzle.ts';
+import loadHighs from 'highs';
+import { createWordOptimizer } from '../src/lib/wordOptimizer.ts';
+import { createContextScore } from '../src/lib/contextModel.ts';
 
 const readLayer = (name: string) => parseLexiconText(gunzipSync(readFileSync(new URL(`../src/data/${name}.txt.gz`, import.meta.url))).toString('utf8'));
 const lexicon = mergeLexiconLayers(readLayer('english-wordfreq'), readLayer('english-wordnik-tail'));
 const constructionStarted = performance.now();
-const solver = new DropQuoteSolver(lexicon.words, lexicon.rankedWords);
+const context = JSON.parse(gunzipSync(readFileSync(new URL('../src/data/english-context.json.gz', import.meta.url))).toString('utf8'));
+const solver = new DropQuoteSolver(lexicon.words, lexicon.rankedWords, { contextScore: createContextScore(context), optimizer: createWordOptimizer(await loadHighs()) });
 console.log(JSON.stringify({ kind: 'dictionary', words: lexicon.words.length, rankedWords: lexicon.rankedWords.length, constructionMs: Math.round(performance.now() - constructionStarted), heapMiB: Math.round(process.memoryUsage().heapUsed / 1024 ** 2) }));
 
 function makePuzzle(text: string, cols: number, minimumRows = 1) {
@@ -37,3 +41,8 @@ const senses = parsePuzzle(JSON.parse(readFileSync(new URL('../tests/fixtures/se
 const sensesAnswer = 'ODORLESS WATCHTOWER EARSHOT HEARSAY FORESIGHT NOSECLIP TASTEABLE TOUCHDOWN EARRING HANDCRAFT NOSEGUARD';
 const sensesReport = solver.solve(senses.rows, senses.cols, senses.columnLetters, senses.blocks, { allowJoinedWords: true, timeLimitMs: 5_000, maxNodes: 1_000_000, maxResults: 30 });
 console.log(JSON.stringify({ kind: 'senses-word-list', rank: sensesReport.results.findIndex(result => result.text === sensesAnswer) + 1 || null, topText: sensesReport.results[0]?.text, ...sensesReport.stats, status: sensesReport.status }));
+
+const wild = parsePuzzle(JSON.parse(readFileSync(new URL('../tests/fixtures/wild-things.json', import.meta.url), 'utf8')));
+const wildAnswer = 'HIS MOTHER CALLED HIM WILD THING AND MAX SAID ILL EAT YOU UP SO HE WAS SENT TO BED WITHOUT EATING ANYTHING THAT VERY NIGHT IN MAXS ROOM A FOREST GREW AND GREW AND GREW UNTIL HIS CEILING HUNG WITH VINES';
+const wildReport = solver.solve(wild.rows, wild.cols, wild.columnLetters, wild.blocks, { timeLimitMs: 10_000, maxNodes: 1_000_000, maxResults: 30 });
+console.log(JSON.stringify({ kind: 'wild-things', rank: wildReport.results.findIndex(result => result.text === wildAnswer) + 1 || null, topText: wildReport.results[0]?.text, resolvedUnknowns: wildReport.results[0]?.resolvedUnknowns, ...wildReport.stats, status: wildReport.status }));

@@ -65,6 +65,17 @@ test('the supplied themed word-list puzzle solves without injecting answer words
   await expect(page.getByRole('button', { name: /#1 Score/ })).toContainText('ODORLESS WATCHTOWER EARSHOT HEARSAY FORESIGHT NOSECLIP TASTEABLE TOUCHDOWN EARRING HANDCRAFT NOSEGUARD', { timeout: 20000 });
 });
 
+test('the supplied 26-column quotation ranks first without supplied answer words or known letters', async ({ page }) => {
+  await ready(page);
+  const puzzle = JSON.parse(readFileSync(new URL('../tests/fixtures/wild-things.json', import.meta.url), 'utf8')) as Puzzle;
+  await importPuzzle(page, puzzle);
+  await page.getByLabel('Search time').selectOption('15');
+  await page.getByRole('button', { name: 'Find quotes' }).click();
+  await expect(page.getByRole('button', { name: /#1 Score/ })).toContainText('HIS MOTHER CALLED HIM WILD THING AND MAX SAID ILL EAT YOU UP SO HE WAS SENT TO BED WITHOUT EATING ANYTHING THAT VERY NIGHT IN MAXS ROOM A FOREST GREW AND GREW AND GREW UNTIL HIS CEILING HUNG WITH VINES', { timeout: 25000 });
+  await expect(page.getByText('Column 2:', { exact: false })).toContainText('R');
+  await page.screenshot({ path: 'test-results/wild-things-results.png', fullPage: true });
+});
+
 test('a large ambiguous search stays responsive and can be immediately cancelled', async ({ page }) => {
   await ready(page);
   const puzzle = puzzleFromText((EXAMPLE_TEXT + ' ').repeat(25), 30);

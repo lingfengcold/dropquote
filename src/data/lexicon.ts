@@ -28,6 +28,10 @@ async function decodeBundledLexicon(): Promise<LexiconData> {
 }
 
 async function decodeInlineAsset(url: string): Promise<string[]> {
+  return parseLexiconText(await decodeInlineText(url));
+}
+
+export async function decodeInlineText(url: string): Promise<string> {
   // ?inline puts the compressed asset in the worker as a data URI. Decoding it
   // directly keeps dictionary availability independent of GitHub/raw or fetch.
   const separator = url.indexOf(',');
@@ -37,5 +41,5 @@ async function decodeInlineAsset(url: string): Promise<string[]> {
   const binary = atob(url.slice(separator + 1));
   const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
   const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
-  return parseLexiconText(await new Response(stream).text());
+  return new Response(stream).text();
 }
