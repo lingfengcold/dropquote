@@ -1,0 +1,166 @@
+{
+  "source": "NLTK Project Gutenberg Selections, 18 texts",
+  "sourceUrl": "https://raw.githubusercontent.com/nltk/nltk_data/550b6625bcef1f2abff2ff770a5a0d272c9c6b2a/packages/corpora/gutenberg.zip",
+  "sourceRevision": "550b6625bcef1f2abff2ff770a5a0d272c9c6b2a",
+  "sourceSha256": "2d3c3ab548c653944310f37f536443ec85d0a0ad855fcae217a0c9efdce2d611",
+  "sourceBytes": 4251829,
+  "sourceLicense": "Public domain, as designated by NLTK; upstream README retained in gutenberg-README.txt",
+  "sourceNoticeSha256": "0bbe8db0799fcc3bee6a1dedb20d84477519f4e3c99b1f3156e7ce42c8140fab",
+  "sourceFiles": [
+    {
+      "path": "gutenberg/austen-emma.txt",
+      "bytes": 887071,
+      "sha256": "71b0923d75fcf2f1faa897b22da8de8e2476d7478a2b22388eb58a3420e00215"
+    },
+    {
+      "path": "gutenberg/austen-persuasion.txt",
+      "bytes": 466292,
+      "sha256": "cec097657cbfeb62aafe178973f514fa07ab66a5e28ea025ebd5d51ca870e40f"
+    },
+    {
+      "path": "gutenberg/austen-sense.txt",
+      "bytes": 673022,
+      "sha256": "57b169c7cfa502896dee25bd66616f61cc1d21084caf31f015176ee46fda9718"
+    },
+    {
+      "path": "gutenberg/bible-kjv.txt",
+      "bytes": 4332554,
+      "sha256": "3f56c9f0bbc796312aacc5fcb49a799f5c5f729f00db3f86bff26319a93bfede"
+    },
+    {
+      "path": "gutenberg/blake-poems.txt",
+      "bytes": 38153,
+      "sha256": "840897a66e23a47dd1fd56b864f421b2be0af074dc081244f7995bf26939eee9"
+    },
+    {
+      "path": "gutenberg/bryant-stories.txt",
+      "bytes": 249439,
+      "sha256": "c87f2c50a00055010f02edb6bb643aabe2473465da7f62db43cb4cda1a1c768d"
+    },
+    {
+      "path": "gutenberg/burgess-busterbrown.txt",
+      "bytes": 84663,
+      "sha256": "7d8b1648ffeaa7268819c62852e5653f2f295528411c8c895ce3941581146331"
+    },
+    {
+      "path": "gutenberg/carroll-alice.txt",
+      "bytes": 144395,
+      "sha256": "5ce9042c0d8536b072b61d4c7c4e6d70c72d9dbb5f3d816261326d9280749266"
+    },
+    {
+      "path": "gutenberg/chesterton-ball.txt",
+      "bytes": 457450,
+      "sha256": "c6b6d4e8c09a3f49a09f37f4e47663d4d6f048b62d86c70ccafdfd8f27059a58"
+    },
+    {
+      "path": "gutenberg/chesterton-brown.txt",
+      "bytes": 406629,
+      "sha256": "67027976205b4b30e367c704807f56c8ffac3e8ea6037d993e57ab1fe28447ec"
+    },
+    {
+      "path": "gutenberg/chesterton-thursday.txt",
+      "bytes": 320525,
+      "sha256": "8b431a2a8db84089cd6f83fa66610c3b12c04114609df6e90137c0c58f2c5493"
+    },
+    {
+      "path": "gutenberg/edgeworth-parents.txt",
+      "bytes": 935158,
+      "sha256": "543b2162782f839b9917b88956acbd7507df37c543286c16c228b36dda0cf950"
+    },
+    {
+      "path": "gutenberg/melville-moby_dick.txt",
+      "bytes": 1242990,
+      "sha256": "dc2466ee3c2e6e2ea1f86233d142e4b5578fdc1d6f0ca657bee7572202a980c7"
+    },
+    {
+      "path": "gutenberg/milton-paradise.txt",
+      "bytes": 468220,
+      "sha256": "49028a77c557de1459e96c026edbe72997be2d9015925f7baefb793cd6fe706f"
+    },
+    {
+      "path": "gutenberg/shakespeare-caesar.txt",
+      "bytes": 112310,
+      "sha256": "7c46bd32fc84d9596bcad55b61ec3c1a390239acb190b286422855aafc2774b3"
+    },
+    {
+      "path": "gutenberg/shakespeare-hamlet.txt",
+      "bytes": 162881,
+      "sha256": "1eceab7027ad7e0cc25c6b6aadcb2e6bb070395cb2085f775ac732d63d5db240"
+    },
+    {
+      "path": "gutenberg/shakespeare-macbeth.txt",
+      "bytes": 100351,
+      "sha256": "d4a204352cfe5924cbae76f764225d120e9f7617d39cb8c949dedd3f306353ac"
+    },
+    {
+      "path": "gutenberg/whitman-leaves.txt",
+      "bytes": 711215,
+      "sha256": "93ebaf1dccc8f1514b4b1c2f52e64e81829113fc58cff63fb51ada0c72f99c3e"
+    }
+  ],
+  "normalization": "ASCII letter words; uppercase; remove internal apostrophes/hyphens; reset adjacent pairs at . ! ? ; : and file boundaries",
+  "classes": {
+    "@DET": [
+      "A",
+      "AN",
+      "THE",
+      "THIS",
+      "THAT",
+      "THESE",
+      "THOSE",
+      "MY",
+      "YOUR",
+      "HIS",
+      "HER",
+      "ITS",
+      "OUR",
+      "THEIR"
+    ],
+    "@OBJ": [
+      "ME",
+      "YOU",
+      "HIM",
+      "HER",
+      "IT",
+      "US",
+      "THEM"
+    ],
+    "@SUBJ": [
+      "I",
+      "YOU",
+      "HE",
+      "SHE",
+      "IT",
+      "WE",
+      "THEY"
+    ],
+    "@PREP": [
+      "AT",
+      "BY",
+      "FOR",
+      "FROM",
+      "IN",
+      "INTO",
+      "OF",
+      "ON",
+      "TO",
+      "WITH",
+      "WITHOUT"
+    ]
+  },
+  "formula": "min(2.5, max(0, log10(pairCount * tokenCount / (leftCount * rightCount)))) * pairCount / (pairCount + 4)",
+  "minimumPairCount": 1,
+  "minimumScoreBeforeRounding": 0.08,
+  "scoreDecimalPlaces": 3,
+  "maximumStoredScore": 2.5,
+  "backoffWeight": 0.7,
+  "contextWeight": 2,
+  "tokenCount": 2110171,
+  "pairScoreCount": 494612,
+  "wordPairScoreCount": 439477,
+  "classPairScoreCount": 55135,
+  "uncompressedBytes": 10301989,
+  "textSha256": "ebf508d9fc514b4ccaf8369aa2cd9f987eb6bbc2644c71539e1ede2496761ad8",
+  "compressedBytes": 2838244,
+  "gzipSha256": "279df7850f60636cb9f655c1400791837db4aab38d1abe28daf1248767513707"
+}

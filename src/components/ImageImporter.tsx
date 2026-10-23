@@ -1,188 +1,322 @@
-import React, { useState, useRef } from 'react';
-import Tesseract from 'tesseract.js';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, Upload, Check, X } from 'lucide-react';
+import { evenColumnBoundaries, type OcrColumnResult } from '../lib/ocr';
+import type { OcrLetterCase, OcrWorkerRequest, OcrWorkerResponse } from '../lib/ocrProtocol';
+import { useI18n } from '../lib/i18n';
+import { localizeOcrMessage } from '../lib/ocrMessages';
+import { LanguageSelect } from './LanguageSelect';
 
 interface ImageImporterProps {
   numColumns: number;
+  maxLettersPerColumn?: number;
   onImport: (columns: string[][]) => void;
   onClose: () => void;
 }
+interface Crop { left: number; top: number; right: number; bottom: number }
+interface UploadedImage { url: string; element: HTMLImageElement; name: string }
+interface OcrRun { cancelled: boolean; worker?: Worker; terminated: boolean }
+const FULL_CROP: Crop = { left: 0, top: 0, right: 100, bottom: 100 };
 
-export function ImageImporter({ numColumns, onImport, onClose }: ImageImporterProps) {
-  const [image, setImage] = useState<string | null>(null);
+function terminateRun(run: OcrRun | null) {
+  if (!run) return;
+  run.cancelled = true;
+  if (run.worker && !run.terminated) {
+    run.terminated = true;
+    // Let an initialized engine release its child worker first, with a hard stop for stalled
+    // model downloads or pixel processing. The outer worker also owns the nested worker.
+    const worker = run.worker;
+    worker.postMessage({ type: 'cancel' });
+    setTimeout(() => worker.terminate(), 100);
+  }
+}
+const nextFrame = (): Promise<void> => new Promise(resolve => requestAnimationFrame(() => resolve()));
+
+export function ImageImporter({ numColumns, maxLettersPerColumn, onImport, onClose }: ImageImporterProps) {
+  const { locale, t } = useI18n();
+  const translateOcr = (message: string) => localizeOcrMessage(message, locale);
+  const [image, setImage] = useState<UploadedImage | null>(null);
+  const [loadingImage, setLoadingImage] = useState(false);
+  const [crop, setCrop] = useState<Crop>(FULL_CROP);
+  const [guideText, setGuideText] = useState('');
+  const [removeLines, setRemoveLines] = useState(true);
+  const [mode, setMode] = useState<'columns' | 'grid'>('columns');
+  const [letterCase, setLetterCase] = useState<OcrLetterCase>('auto');
   const [processing, setProcessing] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [status, setStatus] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [previewText, setPreviewText] = useState<string>("");
-  
+  const [result, setResult] = useState<OcrColumnResult | null>(null);
+  const [columnText, setColumnText] = useState<string[]>([]);
+  const [checkedColumns, setCheckedColumns] = useState<Set<number>>(new Set());
+  const [processedPreview, setProcessedPreview] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const activeRun = useRef<OcrRun | null>(null);
+  const objectUrl = useRef<string | null>(null);
+  const previewUrl = useRef<string | null>(null);
+  const mounted = useRef(true);
+  const uploadVersion = useRef(0);
+  const dragStart = useRef<{ x: number; y: number } | null>(null);
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      setImage(event.target?.result as string);
-      setError(null);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      uploadVersion.current++;
+      terminateRun(activeRun.current);
+      if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
+      if (previewUrl.current) URL.revokeObjectURL(previewUrl.current);
     };
-    reader.readAsDataURL(file);
+  }, []);
+
+  const guides = useMemo(() => {
+    if (!guideText.trim()) return { positions: evenColumnBoundaries(100, numColumns), error: '' };
+    const positions = guideText.split(/[,，\s]+/).filter(Boolean).map(Number);
+    if (positions.length !== numColumns - 1 || positions.some((value, index) =>
+      !Number.isFinite(value) || value <= 0 || value >= 100 || (index > 0 && value <= positions[index - 1]))) {
+      return { positions: evenColumnBoundaries(100, numColumns), error: `Enter ${numColumns - 1} increasing guide positions between 0 and 100, or leave blank for equal columns.` };
+    }
+    return { positions: [0, ...positions, 100], error: '' };
+  }, [guideText, numColumns]);
+
+  const invalidateResult = () => {
+    setResult(null);
+    if (previewUrl.current) URL.revokeObjectURL(previewUrl.current);
+    previewUrl.current = null;
+    setProcessedPreview(null);
+    setError(null);
+    setCheckedColumns(new Set());
+  };
+  const cancel = () => {
+    terminateRun(activeRun.current);
+    activeRun.current = null;
+    setProcessing(false);
+    setStatus('Recognition cancelled. You can adjust the crop and try again.');
+  };
+  const close = () => {
+    terminateRun(activeRun.current);
+    activeRun.current = null;
+    onClose();
   };
 
-  const processImage = async () => {
-    if (!image) return;
-
-    setProcessing(true);
-    setError(null);
-
+  const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    cancel();
+    invalidateResult();
+    if (file.size > 25 * 1024 * 1024) {
+      setError('This image exceeds 25 MB. Resize it or upload a screenshot of the letter area.');
+      return;
+    }
+    const version = ++uploadVersion.current;
+    setLoadingImage(true);
+    if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
+    objectUrl.current = null;
+    setImage(null);
+    const url = URL.createObjectURL(file);
     try {
-      // 1. Recognize Text
-      const result = await Tesseract.recognize(
-        image,
-        'eng',
-        { 
-          logger: m => console.log(m) 
-        }
-      );
-      
-      const text = result.data.text;
-      setPreviewText(text);
-
-      // 2. Parse Logic
-      // Assumption: Input is the letter grid.
-      // Tesseract reads Row by Row.
-      // A B C
-      // D E F
-      //
-      // We need to split by lines, then by whitespace to get a grid.
-      // Then Transpose.
-      
-      const lines = text.split('\n').filter(l => l.trim().length > 0);
-      
-      // Attempt to tokenize lines into characters/blocks
-      // Filter out non-alpha characters just in case, but keep structure?
-      // Actually, simple split by space usually works for spaced letters.
-      
-      const rows: string[][] = lines.map(line => {
-          // Remove all non-alpha chars except spaces to preserve separation? 
-          // Or just take all alpha chars.
-          // Let's match all single letters.
-          const matches = line.match(/[A-Za-z]/g);
-          return matches || [];
-      });
-
-      // Find max width to pad
-      const maxWidth = Math.max(...rows.map(r => r.length), 0);
-      
-      // If detected width matches numColumns, great.
-      // If not, we might have issues. 
-      
-      if (maxWidth === 0) {
-          throw new Error("No letters detected.");
+      const element = new Image();
+      element.src = url;
+      await element.decode();
+      if (!mounted.current || version !== uploadVersion.current) { URL.revokeObjectURL(url); return; }
+      if (!element.naturalWidth || element.naturalWidth * element.naturalHeight > 45_000_000) {
+        throw new Error('This image is too large. Resize it to less than 45 megapixels before importing.');
       }
-
-      // Transpose
-      const newColumns: string[][] = Array.from({ length: numColumns }, () => []);
-
-      // We only take up to numColumns from each row
-      rows.forEach(row => {
-          row.forEach((char, colIndex) => {
-              if (colIndex < numColumns) {
-                  newColumns[colIndex].push(char.toUpperCase());
-              }
-          });
-      });
-
-      onImport(newColumns);
-      
-    } catch (err) {
-      console.error(err);
-      setError("Failed to process image. Please try a clearer image or manual entry.");
+      if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
+      objectUrl.current = url;
+      setImage({ url, element, name: file.name });
+      setCrop(FULL_CROP);
+      setStatus('');
+    } catch (cause) {
+      URL.revokeObjectURL(url);
+      if (mounted.current && version === uploadVersion.current) {
+        setError(cause instanceof Error && cause.message.includes('megapixels') ? cause.message : 'The image could not be opened. Try a PNG or JPEG screenshot.');
+      }
     } finally {
-      setProcessing(false);
+      if (mounted.current && version === uploadVersion.current) setLoadingImage(false);
     }
   };
 
+  const updateCrop = (field: keyof Crop, value: number) => {
+    if (!Number.isFinite(value)) return;
+    invalidateResult();
+    setCrop(previous => {
+      const next = { ...previous, [field]: Math.min(100, Math.max(0, value)) };
+      return next.right - next.left < 0.5 || next.bottom - next.top < 0.5 ? previous : next;
+    });
+  };
+  const imagePoint = (event: React.PointerEvent<HTMLDivElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    return {
+      x: Math.max(0, Math.min(100, (event.clientX - rect.left) / rect.width * 100)),
+      y: Math.max(0, Math.min(100, (event.clientY - rect.top) / rect.height * 100)),
+    };
+  };
+
+  const processImage = async () => {
+    if (!image || guides.error || processing) return;
+    const run: OcrRun = { cancelled: false, terminated: false };
+    activeRun.current = run;
+    const isCurrent = () => mounted.current && activeRun.current === run && !run.cancelled;
+    setProcessing(true);
+    invalidateResult();
+    setProgress(0);
+    setStatus('Preparing the selected letter area…');
+    try {
+      await nextFrame();
+      if (!isCurrent()) return;
+      const sourceX = image.element.naturalWidth * crop.left / 100;
+      const sourceY = image.element.naturalHeight * crop.top / 100;
+      const sourceWidth = image.element.naturalWidth * (crop.right - crop.left) / 100;
+      const sourceHeight = image.element.naturalHeight * (crop.bottom - crop.top) / 100;
+      if (sourceWidth < numColumns * 3 || sourceHeight < 5) throw new Error('The selected area is too small. Include the complete letter columns.');
+      const desiredScale = Math.max(1, Math.min(4, numColumns * 80 / sourceWidth));
+      const scale = Math.min(desiredScale, 4096 / Math.max(sourceWidth, sourceHeight), Math.sqrt(6_000_000 / (sourceWidth * sourceHeight)));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(sourceWidth * scale));
+      canvas.height = Math.max(1, Math.round(sourceHeight * scale));
+      const context = canvas.getContext('2d', { willReadFrequently: true });
+      if (!context) throw new Error('Your browser could not prepare the image.');
+      context.fillStyle = '#fff';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(image.element, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height);
+      const boundaries = guides.positions.map(position => canvas.width * position / 100);
+      const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
+      // Own the outer worker immediately, so even an engine/model download can be cancelled.
+      // Pixel processing and Tesseract both run outside React's main thread.
+      const worker = new Worker(new URL('../lib/ocr.worker.ts', import.meta.url), { type: 'module' });
+      run.worker = worker;
+      const finish = () => {
+        setProcessing(false);
+        activeRun.current = null;
+        terminateRun(run);
+      };
+      worker.onmessage = ({ data }: MessageEvent<OcrWorkerResponse>) => {
+        if (!isCurrent()) return;
+        if (data.type === 'progress') {
+          setProgress(data.progress);
+          setStatus(data.status);
+        } else if (data.type === 'preview') {
+          if (previewUrl.current) URL.revokeObjectURL(previewUrl.current);
+          previewUrl.current = URL.createObjectURL(data.blob);
+          setProcessedPreview(previewUrl.current);
+        } else if (data.type === 'complete') {
+          setResult(data.result);
+          setColumnText(data.result.columns.map(column => column.join('')));
+          setProgress(100);
+          setStatus('Recognition finished. Review every column, then apply.');
+          finish();
+        } else {
+          setError(data.message);
+          setStatus('Recognition stopped.');
+          finish();
+        }
+      };
+      worker.onerror = event => {
+        event.preventDefault();
+        if (!isCurrent()) return;
+        setError(event.message || 'The OCR worker could not start. Check your connection and try again.');
+        finish();
+      };
+      const request: OcrWorkerRequest = { type: 'recognize', pixels: pixels.data.buffer, width: canvas.width, height: canvas.height, boundaries, mode, removeLines, letterCase };
+      worker.postMessage(request, [request.pixels]);
+    } catch (cause) {
+      if (isCurrent()) {
+        setError(cause instanceof Error ? cause.message : 'Recognition failed. Check the crop and try again.');
+        setProcessing(false);
+        activeRun.current = null;
+      }
+      terminateRun(run);
+    }
+  };
+
+  const invalidColumn = columnText.some(text => /[^A-Z?\s]/.test(text));
+  const overfullColumns = maxLettersPerColumn === undefined ? [] : columnText.flatMap((text, index) =>
+    (text.match(/[A-Z?]/g)?.length ?? 0) > maxLettersPerColumn ? [index + 1] : []);
+  const letterCount = columnText.reduce((total, text) => total + (text.match(/[A-Z?]/g)?.length ?? 0), 0);
+
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-bold">Import from Image</h2>
-          <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded">
-            <X size={24} />
-          </button>
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-3" role="dialog" aria-modal="true" aria-labelledby="image-import-title">
+      <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[94vh] overflow-hidden flex flex-col">
+        <div className="shrink-0 bg-white flex justify-between items-center gap-3 border-b border-gray-100 p-4 sm:px-6">
+          <h2 id="image-import-title" className="text-xl font-bold">{t('Import letter columns from image', '从图片导入字母列')}</h2>
+          <div className="flex shrink-0 items-center gap-2"><LanguageSelect /><button onClick={close} aria-label={t('Close image importer', '关闭图片导入')} className="p-1 hover:bg-gray-100 rounded"><X size={24} /></button></div>
         </div>
-
-        <div className="space-y-4">
-          <div className="bg-blue-50 p-4 rounded-md text-sm text-blue-800">
-            <strong>Instructions:</strong>
-            <ul className="list-disc ml-5 mt-1 space-y-1">
-              <li>Upload an image containing <strong>only the letter grid</strong> (the top part of the drop quote).</li>
-              <li>Ensure the image is clear and upright.</li>
-              <li>The tool will try to detect letters row-by-row and place them into columns.</li>
-              <li>You can review and edit the results afterwards.</li>
-            </ul>
+        <div className="min-h-0 overflow-y-auto p-4 sm:p-6">
+        <p className="text-sm text-gray-600 mb-4">{t('Select only the letter bank, excluding the answer grid and instructions. Align the column guides with the puzzle columns; unequal column heights and blank spaces are preserved by position. Recognition runs in your browser. The first use downloads the OCR engine and English data.', '请仅选择字母区，避开答案棋盘和说明文字。将列参考线对齐题目的各列；各列高度不同时，字母和空白仍按原位置保留。识别在浏览器本地运行，首次使用会下载 OCR 引擎和英文识别数据。')}</p>
+        <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageUpload} aria-label={t('Upload puzzle image', '上传题目图片')} />
+        <button onClick={() => fileInputRef.current?.click()} disabled={processing || loadingImage} className="border border-dashed border-blue-400 rounded-md px-4 py-3 text-blue-700 hover:bg-blue-50 flex items-center gap-2 disabled:opacity-50"><Upload size={20} />{loadingImage ? t('Opening image…', '正在打开图片…') : image ? t('Choose another image', '更换图片') : t('Upload image', '上传图片')}</button>
+        {image && (
+          <div className="space-y-4 mt-4">
+            <div className="bg-gray-100 border rounded-md p-2 flex justify-center overflow-hidden">
+              <div className={`relative select-none touch-none ${processing ? '' : 'cursor-crosshair'}`}
+                onPointerDown={event => {
+                  if (processing) return;
+                  dragStart.current = imagePoint(event);
+                  event.currentTarget.setPointerCapture(event.pointerId);
+                  invalidateResult();
+                }}
+                onPointerMove={event => {
+                  if (!dragStart.current || processing) return;
+                  const point = imagePoint(event); const start = dragStart.current;
+                  if (Math.abs(point.x - start.x) >= 0.5 && Math.abs(point.y - start.y) >= 0.5) setCrop({ left: Math.min(start.x, point.x), top: Math.min(start.y, point.y), right: Math.max(start.x, point.x), bottom: Math.max(start.y, point.y) });
+                }}
+                onPointerUp={() => { dragStart.current = null; }} onPointerCancel={() => { dragStart.current = null; }}>
+                <img src={image.url} alt={t(`Puzzle preview: ${image.name}`, `题目预览：${image.name}`)} draggable={false} className="block max-h-[34vh] max-w-full object-contain" />
+                <div className="absolute border-2 border-blue-500 pointer-events-none" style={{ left: `${crop.left}%`, top: `${crop.top}%`, width: `${crop.right - crop.left}%`, height: `${crop.bottom - crop.top}%`, boxShadow: '0 0 0 9999px rgb(0 0 0 / 35%)' }}>
+                  {guides.positions.slice(1, -1).map((position, index) => <div key={index} className="absolute top-0 bottom-0 border-l border-cyan-400" style={{ left: `${position}%` }} />)}
+                </div>
+              </div>
+            </div>
+            <p className="text-xs text-gray-600">{t("Drag on the image to crop, or enter percentages below. Include complete cell widths at the left and right edges, not just the letters' ink.", '在图片上拖动以裁剪，或在下方输入百分比。左右边缘需包含完整单元格的宽度，不要紧贴字母笔画裁剪。')}</p>
+            <fieldset disabled={processing} className="space-y-3 disabled:opacity-60">
+              <div className="flex flex-wrap items-end gap-3">
+                {(['left', 'top', 'right', 'bottom'] as const).map(field => {
+                  const fieldName = { left: '左边界', top: '上边界', right: '右边界', bottom: '下边界' }[field];
+                  return <label key={field} className="text-xs text-gray-700 capitalize">{t(field, fieldName)} %<input type="number" min="0" max="100" step="0.1" aria-label={t(`Crop ${field} percent`, `裁剪${fieldName}百分比`)} value={Math.round(crop[field] * 10) / 10} onChange={event => updateCrop(field, event.target.valueAsNumber)} className="block w-20 border rounded p-1.5 mt-1" /></label>;
+                })}
+                <button className="text-sm text-blue-700 underline py-1.5" onClick={() => { setCrop(FULL_CROP); setGuideText(''); invalidateResult(); }}>{t('Reset crop and guides', '重置裁剪与参考线')}</button>
+              </div>
+              {numColumns > 1 && <details className="text-sm"><summary className="cursor-pointer text-gray-600">{t('Adjust guides for uneven column widths', '调整不等宽列的参考线')}</summary><label className="block text-xs text-gray-600 mt-2">{t('Internal guide positions (% of cropped width, from left to right)', '内部参考线位置（从左到右，占裁剪区域宽度的百分比）')}<input value={guideText} onChange={event => { setGuideText(event.target.value); invalidateResult(); }} placeholder={guides.positions.slice(1, -1).map(value => value.toFixed(1)).join(', ')} className="block w-full border rounded p-2 mt-1" /></label></details>}
+              {guides.error && <p className="text-red-700 text-xs">{translateOcr(guides.error)}</p>}
+              <div className="flex flex-wrap gap-4 items-center text-sm">
+                <label>{t('Recognition mode', '识别模式')} <select value={mode} onChange={event => { setMode(event.target.value as 'columns' | 'grid'); invalidateResult(); }} className="border rounded p-1.5 ml-1"><option value="columns">{t('Each column (recommended)', '逐列识别（推荐）')}</option><option value="grid">{t('Whole area (faster)', '整片区域（较快）')}</option></select></label>
+                <label>{t('Letter case', '原图字母大小写')} <select value={letterCase} onChange={event => { setLetterCase(event.target.value as OcrLetterCase); invalidateResult(); }} className="border rounded p-1.5 ml-1"><option value="auto">{t('Auto (recommended)', '自动判断（推荐）')}</option><option value="upper">{t('Uppercase A–Z', '大写 A–Z')}</option><option value="lower">{t('Lowercase a–z', '小写 a–z')}</option></select></label>
+                <label className="flex items-center gap-2"><input type="checkbox" checked={removeLines} onChange={event => { setRemoveLines(event.target.checked); invalidateResult(); }} />{t('Remove long grid lines', '移除长网格线')}</label>
+              </div>
+              <p className="text-xs text-gray-600">{t('Auto uses the letter case across the whole bank. If I/l alone or mixed case is ambiguous, choose the original image’s case or review the result.', '自动判断会参考整个字母区的大小写。若只有 I/l 或混合大小写难以区分，请选择原图的字母大小写，或核对识别结果。')}</p>
+              {removeLines && <p className="text-xs text-amber-700">{t('Grid removal can affect letters touching lines. Check the processed preview, especially I, L and T.', '移除网格线可能影响与线条接触的字母。请检查处理后的预览，尤其注意 I、L 和 T。')}</p>}
+            </fieldset>
+            <div className="flex flex-wrap items-center gap-3">
+              <button disabled={processing || Boolean(guides.error)} onClick={processImage} className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2">{processing ? <Loader2 size={18} className="animate-spin" /> : <Check size={18} />}{processing ? t('Recognizing…', '正在识别…') : result ? t('Recognize again', '重新识别') : t('Recognize letters', '识别字母')}</button>
+              {processing && <button onClick={cancel} className="border rounded-md px-4 py-2 hover:bg-gray-50">{t('Cancel recognition', '取消识别')}</button>}
+              <span className="text-sm text-gray-600" role="status" aria-live="polite">{translateOcr(status)}</span>
+            </div>
+            {processing && <div><progress value={progress} max={100} className="w-full h-2" aria-label={t('OCR progress', 'OCR 识别进度')} /><span className="text-xs text-gray-500">{progress}%</span></div>}
           </div>
-
-          {!image ? (
-            <div 
-              onClick={() => fileInputRef.current?.click()}
-              className="border-2 border-dashed border-gray-300 rounded-lg p-12 flex flex-col items-center justify-center cursor-pointer hover:border-blue-500 hover:bg-blue-50 transition-colors"
-            >
-              <Upload size={48} className="text-gray-400 mb-2" />
-              <span className="text-gray-600">Click to upload image</span>
-              <input 
-                ref={fileInputRef} 
-                type="file" 
-                accept="image/*" 
-                className="hidden" 
-                onChange={handleImageUpload}
-              />
+        )}
+        {error && <div role="alert" className="bg-red-50 text-red-700 p-3 rounded-md text-sm mt-4">{translateOcr(error)}</div>}
+        {processedPreview && <details className="mt-4 text-sm"><summary className="cursor-pointer text-gray-600">{t('Processed crop preview', '处理后的裁剪预览')}</summary><img src={processedPreview} alt={t('Grayscale crop used by OCR', '用于 OCR 识别的灰度裁剪图片')} className="mt-2 max-h-48 max-w-full border object-contain" /></details>}
+        {result && !processing && (
+          <div className="mt-5 border-t pt-4">
+            <h3 className="font-semibold">{t('Review and edit columns', '核对并编辑各列')}</h3>
+            <p className="text-xs text-gray-600 mt-1">{t('Columns are numbered from left to right. Edit any missed or extra letters; use ? for an unreadable letter. Amber columns need attention; empty columns are allowed. No letters are imported until you click Apply.', '各列从左到右编号。请补充漏掉的字母、删除多余的字母，无法辨认的字母可填 ?。黄色列需要核对，也允许空列。点击“应用”后才会导入字母。')}</p>
+            {result.issues.filter(issue => issue.column === null).map((issue, index) => <p key={index} className="text-xs text-amber-700 mt-2">{translateOcr(issue.message)}</p>)}
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 mt-3">
+              {columnText.map((text, index) => {
+                const issues = result.issues.filter(issue => issue.column === index);
+                const needsReview = issues.length > 0 && !checkedColumns.has(index);
+                return <div key={index} className={`border rounded-md p-2 ${needsReview ? 'border-amber-400 bg-amber-50' : 'border-gray-200'}`}>
+                  <label className="text-xs font-medium block">{t(`Column ${index + 1} · ${text.replace(/\s/g, '').length} letters`, `第 ${index + 1} 列 · ${text.replace(/\s/g, '').length} 个字母`)}<textarea value={text} rows={2} spellCheck={false} aria-label={t(`Letters in column ${index + 1}`, `第 ${index + 1} 列的识别字母`)} className="block w-full border rounded p-2 mt-1 font-mono uppercase bg-white" onChange={event => { setColumnText(previous => previous.map((value, column) => column === index ? event.target.value.toUpperCase() : value)); setCheckedColumns(previous => new Set(previous).add(index)); }} /></label>
+                  {issues.length > 0 && <><p className="text-xs text-amber-800 mt-1">{issues.map(issue => translateOcr(issue.message)).join(' ')}</p><label className="flex items-center gap-1 text-xs mt-2"><input type="checkbox" checked={checkedColumns.has(index)} onChange={event => setCheckedColumns(previous => { const next = new Set(previous); if (event.target.checked) next.add(index); else next.delete(index); return next; })} />{t('Reviewed', '已核对')}</label></>}
+                </div>;
+              })}
             </div>
-          ) : (
-            <div className="space-y-4">
-               <div className="relative border rounded-lg overflow-hidden max-h-64 bg-gray-100 flex justify-center">
-                  <img src={image} alt="Preview" className="object-contain h-full" />
-                  <button 
-                    onClick={() => setImage(null)}
-                    className="absolute top-2 right-2 bg-white/80 p-1 rounded-full shadow hover:bg-white"
-                  >
-                    <X size={16} />
-                  </button>
-               </div>
-               
-               {processing ? (
-                 <div className="flex flex-col items-center justify-center py-8">
-                   <Loader2 className="animate-spin text-blue-600 mb-2" size={32} />
-                   <span className="text-gray-600">Reading text... This may take a moment.</span>
-                 </div>
-               ) : (
-                 <div className="flex justify-end gap-2">
-                    <button 
-                      onClick={processImage}
-                      className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-2"
-                    >
-                      <Check size={18} />
-                      Process & Fill
-                    </button>
-                 </div>
-               )}
-            </div>
-          )}
-
-          {error && (
-            <div className="bg-red-50 text-red-600 p-3 rounded-md text-sm">
-              {error}
-            </div>
-          )}
-          
-          {previewText && !processing && (
-             <div className="mt-4">
-                 <h3 className="text-sm font-semibold mb-1">Detected Text (Raw):</h3>
-                 <pre className="bg-gray-100 p-2 rounded text-xs overflow-auto max-h-32 whitespace-pre-wrap">
-                     {previewText}
-                 </pre>
-             </div>
-          )}
+            {invalidColumn && <p role="alert" className="text-red-700 text-sm mt-2">{t('Use only A–Z letters, ? wildcards and spaces in the edited columns.', '编辑后的各列只能包含 A–Z 字母、? 未知字母和空格。')}</p>}
+            {overfullColumns.length > 0 && <p role="alert" className="text-red-700 text-sm mt-2">{t(`Columns ${overfullColumns.join(', ')} exceed the ${maxLettersPerColumn} answer rows. Remove extra letters or adjust the crop and recognize again.`, `第 ${overfullColumns.join('、')} 列的字母超过 ${maxLettersPerColumn} 行答案格。请删除多余字母，或调整裁剪区域后重新识别。`)}</p>}
+            <div className="flex flex-wrap justify-between items-center gap-3 mt-4"><span className="text-sm text-gray-600">{t(`${letterCount} letters in ${numColumns} columns`, `${numColumns} 列，共 ${letterCount} 个字母`)}</span><button disabled={invalidColumn || overfullColumns.length > 0 || letterCount === 0} onClick={() => onImport(columnText.map(text => text.match(/[A-Z?]/g) ?? []))} className="bg-green-700 hover:bg-green-800 text-white px-4 py-2 rounded-md disabled:opacity-50">{t(`Apply ${letterCount} letters`, `应用 ${letterCount} 个字母`)}</button></div>
+          </div>
+        )}
         </div>
       </div>
     </div>

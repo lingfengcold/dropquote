@@ -1,0 +1,25 @@
+{
+  "source": "Wordnik wordlist-20210729.txt",
+  "author": "Wordnik",
+  "license": "MIT",
+  "sourceUrl": "https://github.com/wordnik/wordlist/tree/46e6215d0f90356afe9c8ba4be347e7e98cb425c",
+  "sourceRevision": "46e6215d0f90356afe9c8ba4be347e7e98cb425c",
+  "sourceFiles": {
+    "wordlist-20210729.txt": {
+      "sha256": "bfd1b4eb4ade1ba81e84c7e24248b9a1aecec9d9baa427453b367a83e30e0451"
+    },
+    "LICENSE": {
+      "sha256": "a568f0ac4c7ad5248ff748387d41e39519811b4a3e07d7438c9d1465dd4c9339"
+    }
+  },
+  "sourceEntryCount": 198422,
+  "normalizedEntryCount": 198420,
+  "wordfreqTextSha256": "5d03fe527f3bb6094d8e1eab24827a2bb84331f0920faadc7d0513d144164fad",
+  "normalization": "Uppercase ASCII letters; remove apostrophes and hyphens; single letters A/I/O only; deduplicate; retain words absent from wordfreq; sort alphabetically; do not assign frequency ranks",
+  "wordCount": 98554,
+  "combinedWordCount": 396376,
+  "uncompressedBytes": 1042139,
+  "compressedBytes": 296772,
+  "textSha256": "d3d98a1becb236910275ba3c261ff698fb272a018d26fe811f7906ff45225607",
+  "gzipSha256": "0f74c6ea067ed9b039818903121101d6772b99ddaa6fa9627d5af5b1645e2093"
+}

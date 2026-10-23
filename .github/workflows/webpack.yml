@@ -24,11 +24,14 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "20" # 使用 Node 20
+          node-version: "22"
           cache: 'npm'
           
       - name: Install dependencies
         run: npm ci # 安装依赖（相当于 npm install）
+
+      - name: Test
+        run: npm test
         
       - name: Build
         run: npm run build # 打包项目
