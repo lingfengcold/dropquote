@@ -1,0 +1,105 @@
+import { test, expect } from '@playwright/test';
+import { EXAMPLE_TEXT, puzzleFromText } from '../src/lib/puzzle';
+
+test('language switching preserves constraints, settings, results and the saved preference', async ({ page }) => {
+  await page.goto('./');
+  await expect(page.getByText(/words · local dictionary/)).toBeVisible();
+  const puzzle = puzzleFromText('THE', 3);
+  puzzle.columnLetters[1] = ['?'];
+  await page.getByLabel('Import puzzle JSON').setInputFiles({ name: 'puzzle.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(puzzle)) });
+  await page.getByRole('button', { name: 'Known letters' }).click();
+  await page.getByRole('textbox', { name: 'Known letter row 1 column 1' }).fill('T');
+  await page.getByLabel('Search time').selectOption('15');
+  await page.getByLabel('Search effort').selectOption('100000');
+  await page.getByLabel('Extra words / names').fill("ZOR'BLAX");
+  await page.getByLabel('Allow joined words').check();
+  await page.getByLabel('Language / 语言').selectOption('zh-CN');
+  await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
+  await expect(page.getByRole('textbox', { name: '第 1 行第 1 列的已知字母' })).toHaveValue('T');
+  await expect(page.getByLabel('搜索时限')).toHaveValue('15');
+  await expect(page.getByLabel('搜索强度')).toHaveValue('100000');
+  await expect(page.getByLabel('补充词汇 / 人名')).toHaveValue("ZOR'BLAX");
+  await expect(page.getByLabel('允许组合词')).toBeChecked();
+  await expect(page.getByText('题目已导入。搜索前请核对棋盘和已知字母。')).toBeVisible();
+  await page.getByRole('button', { name: '开始求解' }).click();
+  await expect(page.getByRole('heading', { name: '候选 #1' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /#1 评分/ })).toContainText('THE');
+  await expect(page.getByText('第 2 列：')).toContainText('H');
+  await page.getByLabel('Language / 语言').selectOption('en');
+  await expect(page.getByRole('heading', { name: 'Candidate #1' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /#1 Score/ })).toContainText('THE');
+  await expect(page.getByText('Column 2:')).toContainText('H');
+  await page.getByLabel('Language / 语言').selectOption('zh-CN');
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+  await page.screenshot({ path: 'test-results/chinese-results.png', fullPage: true });
+  await page.reload();
+  await expect(page.getByLabel('Language / 语言')).toHaveValue('zh-CN');
+  await expect(page).toHaveTitle('Dropquote 求解器');
+  await page.getByRole('button', { name: '继续已保存的题目（1 × 3）→' }).click();
+  await page.getByRole('button', { name: '已知字母', exact: true }).click();
+  await expect(page.getByRole('textbox', { name: '第 1 行第 1 列的已知字母' })).toHaveValue('T');
+});
+
+test('existing validation errors and an open image importer follow language changes', async ({ page }) => {
+  await page.goto('./');
+  await page.getByRole('button', { name: 'Enter letters' }).click();
+  await page.getByLabel('Column 1 letters', { exact: true }).fill('A?');
+  await page.getByRole('button', { name: 'Paste columns' }).click();
+  await page.getByLabel('One column per line; write - for an empty column.').fill('ABC');
+  await page.getByRole('button', { name: 'Apply pasted columns' }).click();
+  await expect(page.getByRole('alert')).toHaveText('Paste exactly 5 lines, one per column.');
+  await page.getByLabel('Language / 语言').selectOption('zh-CN');
+  await expect(page.getByRole('alert')).toHaveText('请粘贴恰好 5 行，每行对应一列。');
+  await expect(page.getByLabel('第 1 列字母', { exact: true })).toHaveValue('A?');
+  await expect(page.getByLabel('每行对应一列，空列用 - 表示。')).toHaveValue('ABC');
+  await page.getByRole('button', { name: '识别图片' }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByRole('heading', { name: '从图片导入字母列' })).toBeVisible();
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="120"><rect width="300" height="120" fill="white"/><text x="20" y="60" font-size="30">A B C D E</text></svg>';
+  await dialog.getByLabel('上传题目图片').setInputFiles({ name: 'columns.svg', mimeType: 'image/svg+xml', buffer: Buffer.from(svg) });
+  await dialog.getByLabel('裁剪上边界百分比').fill('15');
+  await dialog.getByLabel('Language / 语言').selectOption('en');
+  await expect(dialog.getByRole('heading', { name: 'Import letter columns from image' })).toBeVisible();
+  await expect(dialog.getByLabel('Crop top percent')).toHaveValue('15');
+  await expect(dialog.getByRole('img', { name: 'Puzzle preview: columns.svg' })).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await dialog.getByLabel('Language / 语言').selectOption('zh-CN');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+  await page.screenshot({ path: 'test-results/chinese-ocr.png', fullPage: true });
+  await dialog.getByRole('button', { name: '关闭图片导入' }).click();
+  await expect(page.getByLabel('第 1 列字母', { exact: true })).toHaveValue('A?');
+});
+
+test('changing language during a search keeps it running and cancellation still works', async ({ page }) => {
+  await page.goto('./');
+  await expect(page.getByText(/words · local dictionary/)).toBeVisible();
+  const puzzle = puzzleFromText((EXAMPLE_TEXT + ' ').repeat(25), 30);
+  puzzle.columnLetters = puzzle.columnLetters.map(column => column.map(() => '?'));
+  await page.getByLabel('Import puzzle JSON').setInputFiles({ name: 'large.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(puzzle)) });
+  await page.getByLabel('Search time').selectOption('120');
+  await page.getByLabel('Search effort').selectOption('5000000');
+  await page.getByRole('button', { name: 'Find quotes' }).click();
+  await expect(page.getByRole('button', { name: 'Cancel search' })).toBeVisible();
+  await page.getByLabel('Language / 语言').selectOption('zh-CN');
+  await expect(page.getByRole('button', { name: '取消搜索' })).toBeVisible();
+  await page.getByRole('button', { name: '取消搜索' }).click();
+  await expect(page.getByText('搜索已取消，可以修改题目后重新求解。')).toBeVisible();
+  await expect(page.getByLabel('搜索时限')).toHaveValue('120');
+  await page.getByLabel('Language / 语言').selectOption('en');
+  await expect(page.getByText('Search cancelled. You can edit the puzzle and start again.')).toBeVisible();
+});
+
+test.describe('browser language detection', () => {
+  test.use({ locale: 'zh-TW' });
+  test('uses Chinese initially and an explicit English preference wins after reload', async ({ page }) => {
+    await page.goto('./');
+    await expect(page.getByLabel('Language / 语言')).toHaveValue('zh-CN');
+    await expect(page.getByRole('button', { name: '试用示例' })).toBeVisible();
+    await page.getByLabel('Language / 语言').selectOption('en');
+    await page.reload();
+    await expect(page.getByLabel('Language / 语言')).toHaveValue('en');
+    await expect(page.locator('html')).toHaveAttribute('lang', 'en');
+    await expect(page.getByRole('button', { name: 'Try an example' })).toBeVisible();
+  });
+});

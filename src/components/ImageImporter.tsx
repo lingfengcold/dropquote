@@ -2,6 +2,9 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, Upload, Check, X } from 'lucide-react';
 import { evenColumnBoundaries, type OcrColumnResult } from '../lib/ocr';
 import type { OcrWorkerRequest, OcrWorkerResponse } from '../lib/ocrProtocol';
+import { useI18n } from '../lib/i18n';
+import { localizeOcrMessage } from '../lib/ocrMessages';
+import { LanguageSelect } from './LanguageSelect';
 
 interface ImageImporterProps {
   numColumns: number;
@@ -29,6 +32,8 @@ function terminateRun(run: OcrRun | null) {
 const nextFrame = (): Promise<void> => new Promise(resolve => requestAnimationFrame(() => resolve()));
 
 export function ImageImporter({ numColumns, maxLettersPerColumn, onImport, onClose }: ImageImporterProps) {
+  const { locale, t } = useI18n();
+  const translateOcr = (message: string) => localizeOcrMessage(message, locale);
   const [image, setImage] = useState<UploadedImage | null>(null);
   const [loadingImage, setLoadingImage] = useState(false);
   const [crop, setCrop] = useState<Crop>(FULL_CROP);
@@ -233,13 +238,13 @@ export function ImageImporter({ numColumns, maxLettersPerColumn, onImport, onClo
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-3" role="dialog" aria-modal="true" aria-labelledby="image-import-title">
       <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[94vh] overflow-hidden flex flex-col">
         <div className="shrink-0 bg-white flex justify-between items-center gap-3 border-b border-gray-100 p-4 sm:px-6">
-          <h2 id="image-import-title" className="text-xl font-bold">Import letter columns from image</h2>
-          <button onClick={close} aria-label="Close image importer" className="p-1 hover:bg-gray-100 rounded"><X size={24} /></button>
+          <h2 id="image-import-title" className="text-xl font-bold">{t('Import letter columns from image', '从图片导入字母列')}</h2>
+          <div className="flex shrink-0 items-center gap-2"><LanguageSelect /><button onClick={close} aria-label={t('Close image importer', '关闭图片导入')} className="p-1 hover:bg-gray-100 rounded"><X size={24} /></button></div>
         </div>
         <div className="min-h-0 overflow-y-auto p-4 sm:p-6">
-        <p className="text-sm text-gray-600 mb-4">Select only the letter bank, excluding the answer grid and instructions. Align the column guides with the puzzle columns; unequal column heights and blank spaces are preserved by position. Recognition runs in your browser. The first use downloads the OCR engine and English data.</p>
-        <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageUpload} aria-label="Upload puzzle image" />
-        <button onClick={() => fileInputRef.current?.click()} disabled={processing || loadingImage} className="border border-dashed border-blue-400 rounded-md px-4 py-3 text-blue-700 hover:bg-blue-50 flex items-center gap-2 disabled:opacity-50"><Upload size={20} />{loadingImage ? 'Opening image…' : image ? 'Choose another image' : 'Upload image'}</button>
+        <p className="text-sm text-gray-600 mb-4">{t('Select only the letter bank, excluding the answer grid and instructions. Align the column guides with the puzzle columns; unequal column heights and blank spaces are preserved by position. Recognition runs in your browser. The first use downloads the OCR engine and English data.', '请仅选择字母区，避开答案棋盘和说明文字。将列参考线对齐题目的各列；各列高度不同时，字母和空白仍按原位置保留。识别在浏览器本地运行，首次使用会下载 OCR 引擎和英文识别数据。')}</p>
+        <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageUpload} aria-label={t('Upload puzzle image', '上传题目图片')} />
+        <button onClick={() => fileInputRef.current?.click()} disabled={processing || loadingImage} className="border border-dashed border-blue-400 rounded-md px-4 py-3 text-blue-700 hover:bg-blue-50 flex items-center gap-2 disabled:opacity-50"><Upload size={20} />{loadingImage ? t('Opening image…', '正在打开图片…') : image ? t('Choose another image', '更换图片') : t('Upload image', '上传图片')}</button>
         {image && (
           <div className="space-y-4 mt-4">
             <div className="bg-gray-100 border rounded-md p-2 flex justify-center overflow-hidden">
@@ -256,54 +261,57 @@ export function ImageImporter({ numColumns, maxLettersPerColumn, onImport, onClo
                   if (Math.abs(point.x - start.x) >= 0.5 && Math.abs(point.y - start.y) >= 0.5) setCrop({ left: Math.min(start.x, point.x), top: Math.min(start.y, point.y), right: Math.max(start.x, point.x), bottom: Math.max(start.y, point.y) });
                 }}
                 onPointerUp={() => { dragStart.current = null; }} onPointerCancel={() => { dragStart.current = null; }}>
-                <img src={image.url} alt={`Puzzle preview: ${image.name}`} draggable={false} className="block max-h-[34vh] max-w-full object-contain" />
+                <img src={image.url} alt={t(`Puzzle preview: ${image.name}`, `题目预览：${image.name}`)} draggable={false} className="block max-h-[34vh] max-w-full object-contain" />
                 <div className="absolute border-2 border-blue-500 pointer-events-none" style={{ left: `${crop.left}%`, top: `${crop.top}%`, width: `${crop.right - crop.left}%`, height: `${crop.bottom - crop.top}%`, boxShadow: '0 0 0 9999px rgb(0 0 0 / 35%)' }}>
                   {guides.positions.slice(1, -1).map((position, index) => <div key={index} className="absolute top-0 bottom-0 border-l border-cyan-400" style={{ left: `${position}%` }} />)}
                 </div>
               </div>
             </div>
-            <p className="text-xs text-gray-600">Drag on the image to crop, or enter percentages below. Include complete cell widths at the left and right edges, not just the letters' ink.</p>
+            <p className="text-xs text-gray-600">{t("Drag on the image to crop, or enter percentages below. Include complete cell widths at the left and right edges, not just the letters' ink.", '在图片上拖动以裁剪，或在下方输入百分比。左右边缘需包含完整单元格的宽度，不要紧贴字母笔画裁剪。')}</p>
             <fieldset disabled={processing} className="space-y-3 disabled:opacity-60">
               <div className="flex flex-wrap items-end gap-3">
-                {(['left', 'top', 'right', 'bottom'] as const).map(field => <label key={field} className="text-xs text-gray-700 capitalize">{field} %<input type="number" min="0" max="100" step="0.1" aria-label={`Crop ${field} percent`} value={Math.round(crop[field] * 10) / 10} onChange={event => updateCrop(field, event.target.valueAsNumber)} className="block w-20 border rounded p-1.5 mt-1" /></label>)}
-                <button className="text-sm text-blue-700 underline py-1.5" onClick={() => { setCrop(FULL_CROP); setGuideText(''); invalidateResult(); }}>Reset crop and guides</button>
+                {(['left', 'top', 'right', 'bottom'] as const).map(field => {
+                  const fieldName = { left: '左边界', top: '上边界', right: '右边界', bottom: '下边界' }[field];
+                  return <label key={field} className="text-xs text-gray-700 capitalize">{t(field, fieldName)} %<input type="number" min="0" max="100" step="0.1" aria-label={t(`Crop ${field} percent`, `裁剪${fieldName}百分比`)} value={Math.round(crop[field] * 10) / 10} onChange={event => updateCrop(field, event.target.valueAsNumber)} className="block w-20 border rounded p-1.5 mt-1" /></label>;
+                })}
+                <button className="text-sm text-blue-700 underline py-1.5" onClick={() => { setCrop(FULL_CROP); setGuideText(''); invalidateResult(); }}>{t('Reset crop and guides', '重置裁剪与参考线')}</button>
               </div>
-              {numColumns > 1 && <details className="text-sm"><summary className="cursor-pointer text-gray-600">Adjust guides for uneven column widths</summary><label className="block text-xs text-gray-600 mt-2">Internal guide positions (% of cropped width, from left to right)<input value={guideText} onChange={event => { setGuideText(event.target.value); invalidateResult(); }} placeholder={guides.positions.slice(1, -1).map(value => value.toFixed(1)).join(', ')} className="block w-full border rounded p-2 mt-1" /></label></details>}
-              {guides.error && <p className="text-red-700 text-xs">{guides.error}</p>}
+              {numColumns > 1 && <details className="text-sm"><summary className="cursor-pointer text-gray-600">{t('Adjust guides for uneven column widths', '调整不等宽列的参考线')}</summary><label className="block text-xs text-gray-600 mt-2">{t('Internal guide positions (% of cropped width, from left to right)', '内部参考线位置（从左到右，占裁剪区域宽度的百分比）')}<input value={guideText} onChange={event => { setGuideText(event.target.value); invalidateResult(); }} placeholder={guides.positions.slice(1, -1).map(value => value.toFixed(1)).join(', ')} className="block w-full border rounded p-2 mt-1" /></label></details>}
+              {guides.error && <p className="text-red-700 text-xs">{translateOcr(guides.error)}</p>}
               <div className="flex flex-wrap gap-4 items-center text-sm">
-                <label>Recognition mode <select value={mode} onChange={event => { setMode(event.target.value as 'columns' | 'grid'); invalidateResult(); }} className="border rounded p-1.5 ml-1"><option value="columns">Each column (recommended)</option><option value="grid">Whole area (faster)</option></select></label>
-                <label className="flex items-center gap-2"><input type="checkbox" checked={removeLines} onChange={event => { setRemoveLines(event.target.checked); invalidateResult(); }} />Remove long grid lines</label>
+                <label>{t('Recognition mode', '识别模式')} <select value={mode} onChange={event => { setMode(event.target.value as 'columns' | 'grid'); invalidateResult(); }} className="border rounded p-1.5 ml-1"><option value="columns">{t('Each column (recommended)', '逐列识别（推荐）')}</option><option value="grid">{t('Whole area (faster)', '整片区域（较快）')}</option></select></label>
+                <label className="flex items-center gap-2"><input type="checkbox" checked={removeLines} onChange={event => { setRemoveLines(event.target.checked); invalidateResult(); }} />{t('Remove long grid lines', '移除长网格线')}</label>
               </div>
-              {removeLines && <p className="text-xs text-amber-700">Grid removal can affect letters touching lines. Check the processed preview, especially I, L and T.</p>}
+              {removeLines && <p className="text-xs text-amber-700">{t('Grid removal can affect letters touching lines. Check the processed preview, especially I, L and T.', '移除网格线可能影响与线条接触的字母。请检查处理后的预览，尤其注意 I、L 和 T。')}</p>}
             </fieldset>
             <div className="flex flex-wrap items-center gap-3">
-              <button disabled={processing || Boolean(guides.error)} onClick={processImage} className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2">{processing ? <Loader2 size={18} className="animate-spin" /> : <Check size={18} />}{processing ? 'Recognizing…' : result ? 'Recognize again' : 'Recognize letters'}</button>
-              {processing && <button onClick={cancel} className="border rounded-md px-4 py-2 hover:bg-gray-50">Cancel recognition</button>}
-              <span className="text-sm text-gray-600" role="status" aria-live="polite">{status}</span>
+              <button disabled={processing || Boolean(guides.error)} onClick={processImage} className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2">{processing ? <Loader2 size={18} className="animate-spin" /> : <Check size={18} />}{processing ? t('Recognizing…', '正在识别…') : result ? t('Recognize again', '重新识别') : t('Recognize letters', '识别字母')}</button>
+              {processing && <button onClick={cancel} className="border rounded-md px-4 py-2 hover:bg-gray-50">{t('Cancel recognition', '取消识别')}</button>}
+              <span className="text-sm text-gray-600" role="status" aria-live="polite">{translateOcr(status)}</span>
             </div>
-            {processing && <div><progress value={progress} max={100} className="w-full h-2" aria-label="OCR progress" /><span className="text-xs text-gray-500">{progress}%</span></div>}
+            {processing && <div><progress value={progress} max={100} className="w-full h-2" aria-label={t('OCR progress', 'OCR 识别进度')} /><span className="text-xs text-gray-500">{progress}%</span></div>}
           </div>
         )}
-        {error && <div role="alert" className="bg-red-50 text-red-700 p-3 rounded-md text-sm mt-4">{error}</div>}
-        {processedPreview && <details className="mt-4 text-sm"><summary className="cursor-pointer text-gray-600">Processed crop preview</summary><img src={processedPreview} alt="Grayscale crop used by OCR" className="mt-2 max-h-48 max-w-full border object-contain" /></details>}
+        {error && <div role="alert" className="bg-red-50 text-red-700 p-3 rounded-md text-sm mt-4">{translateOcr(error)}</div>}
+        {processedPreview && <details className="mt-4 text-sm"><summary className="cursor-pointer text-gray-600">{t('Processed crop preview', '处理后的裁剪预览')}</summary><img src={processedPreview} alt={t('Grayscale crop used by OCR', '用于 OCR 识别的灰度裁剪图片')} className="mt-2 max-h-48 max-w-full border object-contain" /></details>}
         {result && !processing && (
           <div className="mt-5 border-t pt-4">
-            <h3 className="font-semibold">Review and edit columns</h3>
-            <p className="text-xs text-gray-600 mt-1">Columns are numbered from left to right. Edit any missed or extra letters; use ? for an unreadable letter. Amber columns need attention; empty columns are allowed. No letters are imported until you click Apply.</p>
-            {result.issues.filter(issue => issue.column === null).map((issue, index) => <p key={index} className="text-xs text-amber-700 mt-2">{issue.message}</p>)}
+            <h3 className="font-semibold">{t('Review and edit columns', '核对并编辑各列')}</h3>
+            <p className="text-xs text-gray-600 mt-1">{t('Columns are numbered from left to right. Edit any missed or extra letters; use ? for an unreadable letter. Amber columns need attention; empty columns are allowed. No letters are imported until you click Apply.', '各列从左到右编号。请补充漏掉的字母、删除多余的字母，无法辨认的字母可填 ?。黄色列需要核对，也允许空列。点击“应用”后才会导入字母。')}</p>
+            {result.issues.filter(issue => issue.column === null).map((issue, index) => <p key={index} className="text-xs text-amber-700 mt-2">{translateOcr(issue.message)}</p>)}
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 mt-3">
               {columnText.map((text, index) => {
                 const issues = result.issues.filter(issue => issue.column === index);
                 const needsReview = issues.length > 0 && !checkedColumns.has(index);
                 return <div key={index} className={`border rounded-md p-2 ${needsReview ? 'border-amber-400 bg-amber-50' : 'border-gray-200'}`}>
-                  <label className="text-xs font-medium block">Column {index + 1} · {text.replace(/\s/g, '').length} letters<textarea value={text} rows={2} spellCheck={false} aria-label={`Letters in column ${index + 1}`} className="block w-full border rounded p-2 mt-1 font-mono uppercase bg-white" onChange={event => { setColumnText(previous => previous.map((value, column) => column === index ? event.target.value.toUpperCase() : value)); setCheckedColumns(previous => new Set(previous).add(index)); }} /></label>
-                  {issues.length > 0 && <><p className="text-xs text-amber-800 mt-1">{issues.map(issue => issue.message).join(' ')}</p><label className="flex items-center gap-1 text-xs mt-2"><input type="checkbox" checked={checkedColumns.has(index)} onChange={event => setCheckedColumns(previous => { const next = new Set(previous); if (event.target.checked) next.add(index); else next.delete(index); return next; })} />Reviewed</label></>}
+                  <label className="text-xs font-medium block">{t(`Column ${index + 1} · ${text.replace(/\s/g, '').length} letters`, `第 ${index + 1} 列 · ${text.replace(/\s/g, '').length} 个字母`)}<textarea value={text} rows={2} spellCheck={false} aria-label={t(`Letters in column ${index + 1}`, `第 ${index + 1} 列的识别字母`)} className="block w-full border rounded p-2 mt-1 font-mono uppercase bg-white" onChange={event => { setColumnText(previous => previous.map((value, column) => column === index ? event.target.value.toUpperCase() : value)); setCheckedColumns(previous => new Set(previous).add(index)); }} /></label>
+                  {issues.length > 0 && <><p className="text-xs text-amber-800 mt-1">{issues.map(issue => translateOcr(issue.message)).join(' ')}</p><label className="flex items-center gap-1 text-xs mt-2"><input type="checkbox" checked={checkedColumns.has(index)} onChange={event => setCheckedColumns(previous => { const next = new Set(previous); if (event.target.checked) next.add(index); else next.delete(index); return next; })} />{t('Reviewed', '已核对')}</label></>}
                 </div>;
               })}
             </div>
-            {invalidColumn && <p role="alert" className="text-red-700 text-sm mt-2">Use only A–Z letters, ? wildcards and spaces in the edited columns.</p>}
-            {overfullColumns.length > 0 && <p role="alert" className="text-red-700 text-sm mt-2">Columns {overfullColumns.join(', ')} exceed the {maxLettersPerColumn} answer rows. Remove extra letters or adjust the crop and recognize again.</p>}
-            <div className="flex flex-wrap justify-between items-center gap-3 mt-4"><span className="text-sm text-gray-600">{letterCount} letters in {numColumns} columns</span><button disabled={invalidColumn || overfullColumns.length > 0 || letterCount === 0} onClick={() => onImport(columnText.map(text => text.match(/[A-Z?]/g) ?? []))} className="bg-green-700 hover:bg-green-800 text-white px-4 py-2 rounded-md disabled:opacity-50">Apply {letterCount} letters</button></div>
+            {invalidColumn && <p role="alert" className="text-red-700 text-sm mt-2">{t('Use only A–Z letters, ? wildcards and spaces in the edited columns.', '编辑后的各列只能包含 A–Z 字母、? 未知字母和空格。')}</p>}
+            {overfullColumns.length > 0 && <p role="alert" className="text-red-700 text-sm mt-2">{t(`Columns ${overfullColumns.join(', ')} exceed the ${maxLettersPerColumn} answer rows. Remove extra letters or adjust the crop and recognize again.`, `第 ${overfullColumns.join('、')} 列的字母超过 ${maxLettersPerColumn} 行答案格。请删除多余字母，或调整裁剪区域后重新识别。`)}</p>}
+            <div className="flex flex-wrap justify-between items-center gap-3 mt-4"><span className="text-sm text-gray-600">{t(`${letterCount} letters in ${numColumns} columns`, `${numColumns} 列，共 ${letterCount} 个字母`)}</span><button disabled={invalidColumn || overfullColumns.length > 0 || letterCount === 0} onClick={() => onImport(columnText.map(text => text.match(/[A-Z?]/g) ?? []))} className="bg-green-700 hover:bg-green-800 text-white px-4 py-2 rounded-md disabled:opacity-50">{t(`Apply ${letterCount} letters`, `应用 ${letterCount} 个字母`)}</button></div>
           </div>
         )}
         </div>
