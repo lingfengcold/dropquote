@@ -1,5 +1,7 @@
 import type { OcrColumnResult } from './ocr';
 
+export type OcrLetterCase = 'auto' | 'upper' | 'lower';
+
 export interface OcrWorkerRequest {
   type: 'recognize';
   pixels: ArrayBuffer;
@@ -8,6 +10,7 @@ export interface OcrWorkerRequest {
   boundaries: number[];
   mode: 'columns' | 'grid';
   removeLines: boolean;
+  letterCase?: OcrLetterCase;
 }
 
 export interface OcrCancelRequest { type: 'cancel' }

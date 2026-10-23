@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, Upload, Check, X } from 'lucide-react';
 import { evenColumnBoundaries, type OcrColumnResult } from '../lib/ocr';
-import type { OcrWorkerRequest, OcrWorkerResponse } from '../lib/ocrProtocol';
+import type { OcrLetterCase, OcrWorkerRequest, OcrWorkerResponse } from '../lib/ocrProtocol';
 import { useI18n } from '../lib/i18n';
 import { localizeOcrMessage } from '../lib/ocrMessages';
 import { LanguageSelect } from './LanguageSelect';
@@ -40,6 +40,7 @@ export function ImageImporter({ numColumns, maxLettersPerColumn, onImport, onClo
   const [guideText, setGuideText] = useState('');
   const [removeLines, setRemoveLines] = useState(true);
   const [mode, setMode] = useState<'columns' | 'grid'>('columns');
+  const [letterCase, setLetterCase] = useState<OcrLetterCase>('auto');
   const [processing, setProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [status, setStatus] = useState('');
@@ -217,7 +218,7 @@ export function ImageImporter({ numColumns, maxLettersPerColumn, onImport, onClo
         setError(event.message || 'The OCR worker could not start. Check your connection and try again.');
         finish();
       };
-      const request: OcrWorkerRequest = { type: 'recognize', pixels: pixels.data.buffer, width: canvas.width, height: canvas.height, boundaries, mode, removeLines };
+      const request: OcrWorkerRequest = { type: 'recognize', pixels: pixels.data.buffer, width: canvas.width, height: canvas.height, boundaries, mode, removeLines, letterCase };
       worker.postMessage(request, [request.pixels]);
     } catch (cause) {
       if (isCurrent()) {
@@ -280,8 +281,10 @@ export function ImageImporter({ numColumns, maxLettersPerColumn, onImport, onClo
               {guides.error && <p className="text-red-700 text-xs">{translateOcr(guides.error)}</p>}
               <div className="flex flex-wrap gap-4 items-center text-sm">
                 <label>{t('Recognition mode', '识别模式')} <select value={mode} onChange={event => { setMode(event.target.value as 'columns' | 'grid'); invalidateResult(); }} className="border rounded p-1.5 ml-1"><option value="columns">{t('Each column (recommended)', '逐列识别（推荐）')}</option><option value="grid">{t('Whole area (faster)', '整片区域（较快）')}</option></select></label>
+                <label>{t('Letter case', '原图字母大小写')} <select value={letterCase} onChange={event => { setLetterCase(event.target.value as OcrLetterCase); invalidateResult(); }} className="border rounded p-1.5 ml-1"><option value="auto">{t('Auto (recommended)', '自动判断（推荐）')}</option><option value="upper">{t('Uppercase A–Z', '大写 A–Z')}</option><option value="lower">{t('Lowercase a–z', '小写 a–z')}</option></select></label>
                 <label className="flex items-center gap-2"><input type="checkbox" checked={removeLines} onChange={event => { setRemoveLines(event.target.checked); invalidateResult(); }} />{t('Remove long grid lines', '移除长网格线')}</label>
               </div>
+              <p className="text-xs text-gray-600">{t('Auto uses the letter case across the whole bank. If I/l alone or mixed case is ambiguous, choose the original image’s case or review the result.', '自动判断会参考整个字母区的大小写。若只有 I/l 或混合大小写难以区分，请选择原图的字母大小写，或核对识别结果。')}</p>
               {removeLines && <p className="text-xs text-amber-700">{t('Grid removal can affect letters touching lines. Check the processed preview, especially I, L and T.', '移除网格线可能影响与线条接触的字母。请检查处理后的预览，尤其注意 I、L 和 T。')}</p>}
             </fieldset>
             <div className="flex flex-wrap items-center gap-3">

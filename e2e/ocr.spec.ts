@@ -1,4 +1,6 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 // OCR itself is local, but a clean browser needs to download Tesseract's engine/language
 // data. Keep the real-engine acceptance check opt-in so CI does not depend on a CDN.
@@ -71,6 +73,82 @@ test('real OCR reads lowercase white letters on black despite a bright frame', a
   for (const [index, text] of ['AD', 'EG', 'CF'].entries()) {
     await expect(page.getByLabel(`Letters in column ${index + 1}`, { exact: true })).toHaveValue(text);
   }
+  expect(pageErrors).toEqual([]);
+});
+
+test('real OCR separates I and L and keeps every question mark in the supplied uppercase bank', async ({ page }) => {
+  test.skip(process.env.RUN_OCR_E2E !== '1', 'Set RUN_OCR_E2E=1 to exercise the real OCR engine.');
+  test.setTimeout(180000);
+  const fixture = JSON.parse(readFileSync(new URL('../tests/fixtures/uppercase-il-bank.json', import.meta.url), 'utf8')) as { rows: number; cols: number; columns: string[] };
+  await page.goto(process.env.OCR_BASE_URL ?? './');
+  await page.getByRole('spinbutton', { name: 'Rows', exact: true }).fill(String(fixture.rows));
+  await page.getByRole('spinbutton', { name: 'Columns', exact: true }).fill(String(fixture.cols));
+  await page.getByRole('button', { name: 'Enter letters', exact: true }).click();
+  await page.getByRole('button', { name: 'Read image', exact: true }).click();
+  await page.getByLabel('Upload puzzle image').setInputFiles(fileURLToPath(new URL('../tests/fixtures/uppercase-il-bank.png', import.meta.url)));
+  await expect(page.getByLabel('Letter case')).toHaveValue('auto');
+  await page.getByRole('button', { name: 'Recognize letters', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Review and edit columns' })).toBeVisible({ timeout: 150000 });
+  const actual = await page.getByRole('textbox', { name: /^Letters in column \d+$/ }).evaluateAll(elements => elements.map(element => (element as HTMLTextAreaElement).value));
+  expect(actual).toEqual(fixture.columns);
+  expect(actual[0]).toBe('EGGIISTW');
+  await page.screenshot({ path: 'test-results/uppercase-il-ocr.png', fullPage: true });
+});
+
+test('real OCR keeps lowercase l and distinguishes serif uppercase I from L', async ({ page }) => {
+  test.skip(process.env.RUN_OCR_E2E !== '1', 'Set RUN_OCR_E2E=1 to exercise the real OCR engine.');
+  test.setTimeout(240000);
+  const pageErrors: string[] = [];
+  page.on('pageerror', error => pageErrors.push(error.message));
+  await openImporter(page);
+  for (const sample of [
+    { name: 'uppercase-serif.png', font: '64px "Times New Roman"', rows: ['AED', 'ILI', 'HTR'], columns: ['AIH', 'ELT', 'DIR'] },
+  ]) {
+    const image = await page.evaluate(({ font, rows }) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 600; canvas.height = 360;
+      const context = canvas.getContext('2d')!;
+      context.fillStyle = '#fff'; context.fillRect(0, 0, canvas.width, canvas.height);
+      context.strokeStyle = '#999'; context.lineWidth = 1;
+      for (const x of [0.5, 200.5, 400.5, 599.5]) {
+        context.beginPath(); context.moveTo(x, 0); context.lineTo(x, canvas.height); context.stroke();
+      }
+      for (const y of [0.5, 120.5, 240.5, 359.5]) {
+        context.beginPath(); context.moveTo(0, y); context.lineTo(canvas.width, y); context.stroke();
+      }
+      context.fillStyle = '#000'; context.font = font;
+      context.textAlign = 'center'; context.textBaseline = 'middle';
+      rows.forEach((row, rowIndex) => [...row].forEach((letter, columnIndex) => {
+        context.fillText(letter, columnIndex * 200 + 100, rowIndex * 120 + 60);
+      }));
+      return canvas.toDataURL('image/png').split(',')[1];
+    }, sample);
+    await page.getByLabel('Upload puzzle image').setInputFiles({ name: sample.name, mimeType: 'image/png', buffer: Buffer.from(image, 'base64') });
+    await expect(page.getByAltText(`Puzzle preview: ${sample.name}`)).toBeVisible();
+    await expect(page.getByLabel('Letter case')).toHaveValue('auto');
+    await page.getByRole('button', { name: 'Recognize letters', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Review and edit columns' })).toBeVisible({ timeout: 150000 });
+    const actual = await page.getByRole('textbox', { name: /^Letters in column \d+$/ }).evaluateAll(elements => elements.map(element => (element as HTMLTextAreaElement).value));
+    expect.soft(actual, sample.name).toEqual(sample.columns);
+  }
+  // The user's earlier lowercase screenshot contains genuine l glyphs in columns 4/5.
+  // Keep those as L while correcting visually identical strokes in uppercase banks.
+  await page.getByRole('button', { name: 'Close image importer' }).click();
+  await page.getByRole('button', { name: 'Back', exact: true }).click();
+  const fixture = JSON.parse(readFileSync(new URL('../tests/fixtures/senses-word-list.json', import.meta.url), 'utf8')) as { rows: number; cols: number; columnLetters: string[][] };
+  await page.getByRole('spinbutton', { name: 'Rows', exact: true }).fill(String(fixture.rows));
+  await page.getByRole('spinbutton', { name: 'Columns', exact: true }).fill(String(fixture.cols));
+  await page.getByRole('button', { name: 'Enter letters', exact: true }).click();
+  await page.getByRole('button', { name: 'Read image', exact: true }).click();
+  await page.getByLabel('Upload puzzle image').setInputFiles(fileURLToPath(new URL('../tests/fixtures/lowercase-bank.png', import.meta.url)));
+  await page.getByLabel('Crop top percent').fill('56.7');
+  await expect(page.getByLabel('Letter case')).toHaveValue('auto');
+  await page.getByRole('button', { name: 'Recognize letters', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Review and edit columns' })).toBeVisible({ timeout: 150000 });
+  const lowercaseColumns = await page.getByRole('textbox', { name: /^Letters in column \d+$/ }).evaluateAll(elements => elements.map(element => (element as HTMLTextAreaElement).value));
+  expect(lowercaseColumns).toEqual(fixture.columnLetters.map(column => column.join('')));
+  expect(lowercaseColumns[3]).toBe('LUHRA');
+  expect(lowercaseColumns[4]).toBe('LEIACFR');
   expect(pageErrors).toEqual([]);
 });
 

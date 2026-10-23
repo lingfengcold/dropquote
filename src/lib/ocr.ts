@@ -10,6 +10,7 @@ export interface OcrSymbol {
   text: string;
   confidence: number;
   bbox: OcrBox;
+  review?: string;
 }
 
 interface OcrBlock {
@@ -90,11 +91,13 @@ export function mapSymbolsToColumns(
       const column = boundaries.findIndex((right, boundary) => boundary > 0 && x < right) - 1;
       const guess = raw === '0' ? 'O' : /[1|!]/.test(raw) ? 'I' : raw;
       const normalized = /^[A-Z]$/.test(guess) ? guess : '?';
-      if (normalized === '?') addIssue(column, `Unrecognized character “${raw}” was kept as ?; replace it or leave a wildcard.`);
-      let uncertain = !Number.isFinite(source.confidence) || source.confidence < lowConfidence;
-      if (uncertain) addIssue(column, 'Low confidence: compare these letters with the image.');
-      if ((normalized !== raw && normalized !== '?') || /[IO]/.test(normalized)) {
-        addIssue(column, 'Check I / 1 / l and O / 0 shapes.');
+      if (normalized === '?' && raw !== '?') addIssue(column, `Unrecognized character “${raw}” was kept as ?; replace it or leave a wildcard.`);
+      const low = !Number.isFinite(source.confidence) || source.confidence < lowConfidence;
+      let uncertain = low || Boolean(source.review);
+      if (low) addIssue(column, 'Low confidence: compare these letters with the image.');
+      if (source.review) addIssue(column, source.review);
+      if ((normalized !== raw && normalized !== '?') || /[ILO]/.test(normalized)) {
+        addIssue(column, 'Check I / 1 / l / L and O / 0 shapes.');
       }
       if (characters.length > 1) {
         uncertain = true;

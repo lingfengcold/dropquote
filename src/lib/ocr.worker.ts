@@ -1,6 +1,7 @@
 import { createWorker, OEM, PSM, type Worker as TesseractWorker } from 'tesseract.js';
 import { mapSymbolsToColumns, preprocessOcrPixels, symbolsFromBlocks, type OcrSymbol } from './ocr';
 import type { OcrCancelRequest, OcrWorkerRequest, OcrWorkerResponse } from './ocrProtocol';
+import { resolveLetterCase } from './ocrCase';
 
 const scope = self as unknown as {
   postMessage(message: OcrWorkerResponse): void;
@@ -52,7 +53,7 @@ scope.onmessage = async ({ data }) => {
     await engine.setParameters({
       // Dropquote screenshots also use lowercase fonts. Restricting recognition to
       // uppercase glyphs silently discards d/a/r/etc.; normalize case after recognition.
-      tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz',
+      tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz?',
       // SINGLE_BLOCK preserves isolated characters within grid rows. SPARSE_TEXT can
       // silently discard a lone A/I as a small text fragment, even on a clean scan.
       tessedit_pageseg_mode: PSM.SINGLE_BLOCK,
@@ -86,7 +87,8 @@ scope.onmessage = async ({ data }) => {
       detected.push(...symbolsFromBlocks(recognized.data.blocks));
     }
     if (failed || cancelled) return;
-    const result = mapSymbolsToColumns(detected, boundaries, height);
+    const resolved = resolveLetterCase(detected, pixels, width, height, data.letterCase);
+    const result = mapSymbolsToColumns(resolved, boundaries, height);
     if (!result.symbols.length) throw new Error('No letters were detected. Check the crop, try the other recognition mode, or enter letters manually.');
     // Release Tesseract's nested worker explicitly before the owner disposes of this worker.
     await engine.terminate();
